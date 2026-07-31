@@ -111,13 +111,13 @@ sales-order-netsuite/          <- parent repo
 |---|---|
 | `sales-order-backend/.env` | 後端環境變數 |
 | `sales-order-backend/cmd/sw8/.env` | 後端 sw8 指令環境變數 |
-| `sales-order-frontend/.env` | 前端開發環境變數 |
-| `sales-order-frontend/.env.production` | 前端正式環境變數 |
 | `sales-order-app/android/keystore/hexagon-salesorder-keystore.jks` | Android release keystore |
 
-處理原則：
-- 備份時整個子目錄搬走，所以這些檔案自然保留。
-- 復原時只把需要的檔案貼回 submodule 路徑；其餘 build artifact（`node_modules/`、`build/`、`.dart_tool/` 等）由 submodule 重新產生，不復原。
+**前端 `.env` 檔案特殊情況**：
+- `sales-order-frontend/.env` 與 `sales-order-frontend/.env.production` 在轉換前其實已經被 `sales-order-frontend` submodule 遠端追蹤（非 gitignored）。
+- 為了避免未來誤把敏感資訊 commit，我們從 frontend HEAD 移除了這兩個檔案、新增 `.env*` 到 `.gitignore`，並 push 到 frontend remote master。
+- 轉換後這兩個檔案仍保留在 working tree 中，但不會再被未來的 commit 追蹤。
+- **殘留風險**：由於沒有重寫 frontend history，舊 commit 中仍然看得到這兩個檔案的內容。使用者已確認接受此風險。
 
 ## 7. 錯誤處理與復原
 
@@ -168,6 +168,7 @@ git submodule update --remote
 | 父倉庫遠端 | 暫不設定 | 用戶表示本地 parent repo 即可 |
 | 本地未入版控檔案 | 全部保留並復原 | 用戶選擇全部保留 |
 | 是否保留根目錄 orchestration | 保留 | 用戶選擇保留 Taskfile、openspec、appimg 等 |
+| frontend `.env` 追蹤狀態 | 從 HEAD 移除並 push 到 remote | 實作中發現這兩個檔案原本被 frontend submodule 追蹤；用戶選擇不重寫 history，接受歷史殘留風險 |
 
 ---
 

@@ -19,10 +19,9 @@
 - Local-only files that must survive the conversion:
   - `sales-order-backend/.env`
   - `sales-order-backend/cmd/sw8/.env`
-  - `sales-order-frontend/.env`
-  - `sales-order-frontend/.env.production`
   - `sales-order-app/android/keystore/hexagon-salesorder-keystore.jks`
-- No changes are pushed to the three subproject remotes.
+- **Discovered exception:** `sales-order-frontend/.env` and `sales-order-frontend/.env.production` were tracked in the frontend submodule remote (not gitignored). They were removed from HEAD, added to `.gitignore`, and pushed to the frontend remote as part of Task 4.
+- No other changes are pushed to the three subproject remotes.
 - No CI/CD or application code changes.
 - Commit author for parent repo commits in this plan: `omp-agent <omp-agent@local>`.
 
@@ -262,6 +261,11 @@ Expected output contains a successful commit summary with `.gitmodules` and the 
 **Interfaces:**
 - Consumes: files from `../sales-order-netsuite-backup-2026-07-31/`
 - Produces: restored local-only config/credential files inside each submodule
+
+**Frontend `.env` exception:**
+- `sales-order-frontend/.env` and `sales-order-frontend/.env.production` were tracked in the frontend submodule remote, not gitignored.
+- After copying them back, also remove them from the frontend index, add `.env*` to `sales-order-frontend/.gitignore`, commit inside the submodule, push to origin master, and update the parent gitlink.
+- This is an approved deviation from the original "no remote changes" constraint.
 
 - [ ] **Step 1: Copy each local-only file back to its original location**
 
