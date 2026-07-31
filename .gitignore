@@ -24,5 +24,11 @@ Thumbs.db
 # Turbo (if introduced in future)
 .turbo/
 
+# Solomd editor session files
+.solomd/
+
+# Superpowers scratch workspace
+.superpowers/
+
 # Logs
 *.log
