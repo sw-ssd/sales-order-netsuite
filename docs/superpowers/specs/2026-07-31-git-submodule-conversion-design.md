@@ -73,9 +73,10 @@ sales-order-netsuite/          <- parent repo
      `../sales-order-netsuite-backup-2026-07-31/`。
    - 搬移（move）而非複製，避免重複佔用大量空間（特別是 frontend 的 `node_modules` 與 app 的 `build/`）。
 
-2. **初始化父倉庫**
-   - 在根目錄執行 `git init`。
-   - 把本次設計文件加入 index 並做為第一個 commit（或與其他根目錄檔案一起提交，視實作順序而定）。
+2. **確認父倉庫已初始化**
+   - 為了提交本設計文件，根目錄已經先執行過 `git init` 並把 spec 加入第一個 commit。
+   - 若實作時發現尚未初始化，再補執行 `git init`。
+   - 實際轉換 submodule 時，再把 `.gitmodules`、submodule gitlink 與其他根目錄 orchestration 檔案一起提交。
 
 3. **新增 Submodule**
    - 依序執行：
