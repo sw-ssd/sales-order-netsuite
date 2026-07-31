@@ -1,6 +1,8 @@
 ## ADDED Requirements
 
-### Requirement: `api_keys` 資料表必須透過 Goose migration 建立
+### Requirement: `api_keys` 資料表透過 Goose migration 建立
+
+The system MUST create the `api_keys` table via a Goose migration so that existing databases gain the table required for API key features.
 
 此 capability 只新增一條 migration，讓現有資料庫補上 API key 功能所需的資料表。
 
@@ -12,7 +14,9 @@
 - **WHEN** 開發人員執行 `task goose:up`
 - **THEN** `api_keys` 表被建立，不影響其他既有資料表
 
-### Requirement: migration 檔案必須與 Ent schema 一致
+### Requirement: migration 檔案與 Ent schema 一致
+
+The migration file MUST match the `api_keys` table structure defined in `ent/schema/api_key.go` and `ent/gen/migrate/schema.go`.
 
 migration 必須完全對應 `ent/schema/api_key.go` 與 `ent/gen/migrate/schema.go` 所定義的 `api_keys` 表結構。
 
@@ -20,7 +24,9 @@ migration 必須完全對應 `ent/schema/api_key.go` 與 `ent/gen/migrate/schema
 - **WHEN** 檢視 `database/goose/YYYYMMDDHMMSS_create_api_keys_table.sql`
 - **THEN** 表名、欄位名稱、型別、長度、預設值、nullable、index 必須與 `APIKeysTable` 定義一致
 
-### Requirement: API key 相關測試必須通過
+### Requirement: API key 相關測試通過
+
+The API key related tests MUST pass once the `api_keys` table is available.
 
 補上 migration 後，既有 API key 測試應能在有資料表的環境下正常執行。
 
