@@ -1,0 +1,12 @@
+[submodule "sales-order-backend"]
+	path = sales-order-backend
+	url = https://github.com/hexagon-maker/sales-order-backend.git
+	branch = master
+[submodule "sales-order-frontend"]
+	path = sales-order-frontend
+	url = https://github.com/hexagon-maker/sales-order-frontend.git
+	branch = master
+[submodule "sales-order-app"]
+	path = sales-order-app
+	url = https://github.com/hexagon-maker/sales-order-app.git
+	branch = master
