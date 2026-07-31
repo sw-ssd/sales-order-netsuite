@@ -1,0 +1,7 @@
+providers:
+  lm-studio:
+    baseUrl: https://model.sowinsoft.com/v1   # whatever port oMLX is bound to
+    api: openai-completions               # or openai-responses if oMLX speaks /responses
+    auth: apiKey: OMLX_KEY                # add `apiKey: SOME_ENV_VAR` instead if you've set a key
+    discovery:
+      type: openai-models-list            # GET {baseUrl}/models, one Model per entry

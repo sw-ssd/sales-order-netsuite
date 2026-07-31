@@ -1,0 +1,54 @@
+# https://taskfile.dev
+# Monorepo orchestration for sales-order-netsuite
+# Each sub-project maintains its own Taskfile.yml.
+# This root file aggregates them via `includes` for unified dev/build/test.
+
+version: '3'
+
+dotenv:
+  - ./sales-order-backend/.env
+silent: true
+
+includes:
+  frontend:
+    taskfile: ./sales-order-frontend/Taskfile.yml
+    dir: ./sales-order-frontend
+  backend:
+    taskfile: ./sales-order-backend/Taskfile.yml
+    dir: ./sales-order-backend
+  app:
+    taskfile: ./sales-order-app/Taskfile.yml
+    dir: ./sales-order-app
+
+tasks:
+  default:
+    desc: Lists available commands
+    cmds:
+      - task -l
+
+  dev:
+    desc: 啟動後端開發伺服器（背景） + 前端 dev server
+    cmds:
+      - task: backend:dev &
+      - sleep 3
+      - task: frontend:dev
+
+  build:
+    desc: 建置所有子專案（frontend → backend → app）
+    cmds:
+      - task: frontend:build
+      - task: backend:build
+      - task: app:build
+
+  test:
+    desc: 執行所有子專案的測試
+    cmds:
+      - task: frontend:test
+      - task: backend:test
+      - task: app:test
+
+  tests:auth:
+    desc: 執行 session-auth-improvements 相關測試（CSRF, API Key, Sliding Session, Integration）
+    cmds:
+      - task: backend:test:auth
+
