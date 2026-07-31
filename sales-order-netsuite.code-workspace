@@ -1,0 +1,17 @@
+{
+  "folders": [
+    {
+      "name": "backend",
+      "path": "sales-order-backend"
+    },
+    {
+      "name": "frontend",
+      "path": "sales-order-frontend"
+    },
+    {
+      "name": "app",
+      "path": "sales-order-app"
+    }
+  ],
+  "settings": {}
+}
