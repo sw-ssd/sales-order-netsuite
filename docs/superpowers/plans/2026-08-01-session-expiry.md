@@ -708,11 +708,12 @@ git commit -m "feat(session): restore previous page after 401 re-login (app)"
 
 **Files:**
 - Modify: `sales-order-backend/README.md` 或 `docs/`（session 設定說明，依現況選擇存在的位置）
-- Modify: `openspec/changes/session-expiry-optimization/tasks.md`（同步已完成的 OpenSpec tasks）
 
 **Interfaces:**
 - Consumes: 上述所有實作
-- Produces: 文件化設定與行為；OpenSpec tasks 勾選完成
+- Produces: 文件化設定與行為
+
+> **OpenSpec 同步（tasks.md 勾選 / spec delta）已延後至下一 session**，由使用者指定，本任務不包含。
 
 - [ ] **Step 1: 寫設定文件**
 
@@ -726,9 +727,9 @@ git commit -m "feat(session): restore previous page after 401 re-login (app)"
 - 行為：只要持續使用就不會登出；停止使用超過 SESSION_IDLE_TIMEOUT 才需重新登入。
 ```
 
-- [ ] **Step 2: 更新 OpenSpec tasks.md 勾選完成的任務**
+- [ ] **Step 2: OpenSpec 同步（延後至下一 session）**
 
-將 `openspec/changes/session-expiry-optimization/tasks.md` 中已完成的 checkbox 標為 `[x]`；將「記住我」「OAuth 修補」相關任務標記為移除/調整（與本計畫範圍一致）。
+> **已延後**：`openspec/changes/session-expiry-optimization/tasks.md` 的 checkbox 勾選與 spec delta 同步，由使用者指定於下一個 session 整合。本 session 不執行此步驟。
 
 - [ ] **Step 3: 全量驗證**
 
@@ -766,7 +767,8 @@ git commit -m "docs(session): document session config and sync OpenSpec tasks"
 - Web 401 還原（維持現況）→ Task 8 ✓
 - App 提醒 + 續期 → Task 9, 10 ✓
 - App 401 還原 → Task 11 ✓
-- 文件 + OpenSpec 同步 → Task 12 ✓
+- 文件 + 驗證 → Task 12 ✓
+- OpenSpec tasks.md 同步 → **已延後至下一 session**（使用者指定）
 - 非目標（remember-me、OAuth、refresh token）→ 全部排除 ✓
 
 **2. Placeholder scan：** Task 5 的測試含「若 middleware 測試不可行」的替代路徑（明確條件與程式碼，非 TODO）；Task 10 Step 3 的掛載點描述依現況調整（已標明條件）。無「TBD / 之後再處理」空泛步驟。
