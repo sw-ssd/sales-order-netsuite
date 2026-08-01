@@ -1,0 +1,682 @@
+# Customer / Sales-Order 部門下拉過濾 Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Add a department dropdown filter to the customer and sales-order admin pages: non-managers get a disabled dropdown locked to their own department (list always filtered to it), managers get an enabled dropdown with 「全部部門」+ all active departments (default = own department).
+
+**Architecture:** A shared `DepartmentFilter` component (ark-ui `Select`, driven by `useAuth()`'s `isManager`/`infoDepartment` + metadict `departments` options) is added to each page's `TableToolbar`. Selection changes trigger the pages' existing server-search mutation (`smu` → `fetchQuery(xxxQuery({...params}))`), sending `department_id` (customers) or `department` (sales-orders) — both backend filter params already exist. Initial page queries carry the department param derived from auth so non-managers never see all data.
+
+**Tech Stack:** SolidJS, ark-ui (`~/components/ui/select.tsx`), TanStack Solid Query, vitest + @solidjs/testing-library (unit), Playwright (e2e).
+
+## Global Constraints
+
+- Work happens inside the `sales-order-frontend` git submodule. All `git` commands in tasks run with `cwd = sales-order-frontend`.
+- Backend has NO changes (filter params `department_id` / `department` already exist and are implemented).
+- Frontend-only UX (user-confirmed): API-level bypass is accepted for non-managers.
+- Design spec: `docs/superpowers/specs/2026-08-01-frontend-department-filter-design.md`.
+- Behavior contract (user-confirmed):
+  - Non-manager: dropdown `disabled`, value locked to own department (`infoDepartment()`), `onChange` never fires; list query always carries the department param.
+  - Manager: dropdown enabled, options = 「全部部門」(id 0) + active departments (exclude `is_inactive`), default = own department; selecting 全部 omits the param.
+  - `infoDepartment()` missing → non-manager shows 「無部門」 disabled and no param; manager defaults to 全部.
+- `isManager()` / `infoDepartment()` come from `useAuth()` actions (`src/pages/auth/context.tsx`).
+- There are currently NO vitest tests in the repo — Task 1 creates the scaffold (vitest config + first test). Do not add new dependencies (jsdom and @solidjs/testing-library are already in devDependencies).
+- The `Select` API follows the existing pattern in `src/components/form/FormSelectOptField.tsx` (props `options`, `optionValue`, `optionTextValue`, `optionDisabled`, `value` = option object, `onChange(option|null)`, `itemComponent`).
+- Every task ends with a commit inside the submodule.
+
+---
+
+### Task 1: vitest scaffold + shared `DepartmentFilter` component + unit tests
+
+**Files:**
+- Create: `vitest.config.ts`
+- Create: `src/components/datatable/DepartmentFilter.tsx`
+- Create: `src/components/datatable/DepartmentFilter.test.tsx`
+
+**Interfaces:**
+- Produces: `DepartmentFilter` component with props `{ options: MetadictOption[]; value: number; onChange: (id: number) => void }` (value `0` = 全部) — consumed by Task 2/3 page toolbars.
+
+- [ ] **Step 1: Create the vitest config**
+
+Create `vitest.config.ts`:
+
+```ts
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}"],
+  },
+});
+```
+
+- [ ] **Step 2: Write the failing component tests**
+
+Create `src/components/datatable/DepartmentFilter.test.tsx`:
+
+```tsx
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@solidjs/testing-library";
+import { fireEvent } from "@solidjs/testing-library";
+import { MetadictOption } from "~/models";
+import { DepartmentFilter } from "./DepartmentFilter";
+
+const mocks = vi.hoisted(() => ({
+  isManager: vi.fn<() => boolean>(() => false),
+  infoDepartment: vi.fn<() => number | undefined>(() => -16888),
+}));
+
+vi.mock("~/pages/auth/context", () => ({
+  useAuth: () => [
+    {},
+    {
+      isManager: mocks.isManager,
+      infoDepartment: mocks.infoDepartment,
+      isSystemAdmin: () => false,
+    },
+  ],
+}));
+
+const depts: MetadictOption[] = [
+  { id: 1, opt_id: -16888, name: "Sowinsoft", is_inactive: false, table_name: "departments" },
+  { id: 2, opt_id: 6, name: "Sales", is_inactive: false, table_name: "departments" },
+  { id: 3, opt_id: 7, name: "Inactive Dept", is_inactive: true, table_name: "departments" },
+];
+
+describe("DepartmentFilter", () => {
+  it("non-manager: disabled, locked to own department, no onChange", () => {
+    const onChange = vi.fn();
+    render(() => (
+      <DepartmentFilter options={depts} value={-16888} onChange={onChange} />
+    ));
+
+    const trigger = screen.getByRole("button", { name: "Sowinsoft" });
+    expect(trigger).toHaveProperty("disabled", true);
+    expect(screen.queryByText("全部部門")).toBeNull();
+    expect(screen.queryByText("Sales")).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("non-manager without own department: shows 無部門 placeholder", () => {
+    mocks.infoDepartment.mockReturnValue(undefined);
+    render(() => <DepartmentFilter options={depts} value={0} onChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "無部門" })).toBeTruthy();
+  });
+
+  it("manager: default own department, 全部 + active departments listed, onChange fires", async () => {
+    mocks.isManager.mockReturnValue(true);
+    mocks.infoDepartment.mockReturnValue(-16888);
+    const onChange = vi.fn();
+    render(() => (
+      <DepartmentFilter options={depts} value={-16888} onChange={onChange} />
+    ));
+
+    // default selection shows own department
+    expect(screen.getByRole("button", { name: "Sowinsoft" })).toBeTruthy();
+
+    // open the select: 全部部門 + active departments (inactive excluded)
+    await fireEvent.click(screen.getByRole("button", { name: "Sowinsoft" }));
+    expect(screen.getByText("全部部門")).toBeTruthy();
+    expect(screen.getByText("Sales")).toBeTruthy();
+    expect(screen.queryByText("Inactive Dept")).toBeNull();
+
+    // selecting 全部部門 fires onChange(0)
+    await fireEvent.click(screen.getByText("全部部門"));
+    expect(onChange).toHaveBeenCalledWith(0);
+  });
+});
+```
+
+Note: ark-ui renders `SelectContent` in a portal — if `getByRole` queries race, use `await`/`waitFor` from `@solidjs/testing-library` around the open assertions.
+
+- [ ] **Step 3: Run tests to verify they fail**
+
+```bash
+npm test -- DepartmentFilter
+```
+
+Expected: FAIL — `DepartmentFilter` module not found (component doesn't exist yet).
+
+- [ ] **Step 4: Implement the component**
+
+Create `src/components/datatable/DepartmentFilter.tsx`:
+
+```tsx
+import { Component, createMemo } from "solid-js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "~/components/ui/select";
+import { MetadictOption } from "~/models";
+import { useAuth } from "~/pages/auth/context";
+
+const ALL_OPTION: MetadictOption = {
+  id: 0,
+  opt_id: 0,
+  name: "全部部門",
+  is_inactive: false,
+  table_name: "departments",
+};
+
+interface DepartmentFilterProps {
+  /** departments metas（table_name === "departments"） */
+  options: MetadictOption[];
+  /** 目前選取的部門 id；0 = 全部 */
+  value: number;
+  onChange: (id: number) => void;
+}
+
+export const DepartmentFilter: Component<DepartmentFilterProps> = (props) => {
+  const [, { isManager, infoDepartment }] = useAuth();
+
+  const departments = () =>
+    props.options.filter((o) => o.table_name === "departments" && !o.is_inactive);
+
+  const manager = () => isManager();
+  const ownDeptId = () => infoDepartment();
+
+  const selectOptions = () => {
+    if (manager()) {
+      return [ALL_OPTION, ...departments()];
+    }
+    const own = departments().find((o) => o.opt_id === ownDeptId());
+    return own ? [own] : [];
+  };
+
+  const selected = createMemo(() => {
+    if (manager()) {
+      return selectOptions().find((o) => o.opt_id === props.value) ?? ALL_OPTION;
+    }
+    return selectOptions()[0] ?? null;
+  });
+
+  const handleChange = (val: MetadictOption | null) => {
+    if (manager() && val) {
+      props.onChange(val.opt_id);
+    }
+  };
+
+  return (
+    <Select
+      value={selected()}
+      options={selectOptions()}
+      optionValue="opt_id"
+      optionTextValue="name"
+      optionDisabled="is_inactive"
+      placeholder={manager() ? "全部部門" : "無部門"}
+      onChange={handleChange}
+      disabled={!manager()}
+      itemComponent={(p) => <SelectItem item={p.item}>{p.item.rawValue.name}</SelectItem>}
+    >
+      <SelectTrigger aria-label="部門過濾" class="w-[180px]">
+        <SelectValue<MetadictOption>>
+          {(state) => state.selectedOption()?.name ?? (manager() ? "全部部門" : "無部門")}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent class="max-h-[calc(100svh-30rem)] overflow-y-auto" />
+    </Select>
+  );
+};
+
+export default DepartmentFilter;
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+```bash
+npm test -- DepartmentFilter
+```
+
+Expected: PASS (all 3 cases). If the ark-ui portal interaction is flaky in jsdom, adjust the tests to assert the trigger's `disabled` state and the `value` label only, and assert the manager options via the component's DOM after opening — but keep the `onChange` call assertion.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add vitest.config.ts src/components/datatable/DepartmentFilter.tsx src/components/datatable/DepartmentFilter.test.tsx
+git commit -m "feat: shared DepartmentFilter component with unit tests"
+```
+
+---
+
+### Task 2: Customer page wiring
+
+**Files:**
+- Modify: `src/models/netsuite/customer.ts` (CustomerFilter)
+- Modify: `src/routes/admin/customer.tsx` (CUSTOMER_METADICT_KEYS)
+- Modify: `src/pages/admin/customer/widgets/context.tsx` (signal + smu wiring + expose via tableExActions)
+- Modify: `src/pages/admin/customer/widgets/data-table.tsx` (render DepartmentFilter in toolbar)
+- Modify: `src/pages/admin/customer/Customer.tsx` (initial query params from auth)
+
+**Interfaces:**
+- Consumes: `DepartmentFilter` (Task 1); `useAuth()` actions `infoDepartment`; backend param `department_id` (exists).
+- Produces: customer list server-search with `department_id` param; initial list query filtered for non-managers.
+
+- [ ] **Step 1: Add `department_id` to CustomerFilter**
+
+In `src/models/netsuite/customer.ts`, after the `CustomerFilter` interface:
+
+```ts
+export interface CustomerFilter extends BaseFilter, Partial<Customer> {
+  /** 部門過濾（後端 Nsfilter query=department_id） */
+  department_id?: number;
+}
+```
+
+- [ ] **Step 2: Add departments to metadict keys**
+
+In `src/routes/admin/customer.tsx`, change `CUSTOMER_METADICT_KEYS` to include `"departments"`:
+
+```ts
+export const CUSTOMER_METADICT_KEYS: NsTableNames = [
+  "currency",
+  "term",
+  "customlist_hf_invoice_type",
+  "customlist_hf_cat_number",
+  "customlist_hf_checkout_method",
+  "customlist_hf_payment_methods",
+  "customlist_hf_customer_type",
+  "departments",
+];
+```
+
+- [ ] **Step 3: Wire the filter in the customer context**
+
+In `src/pages/admin/customer/widgets/context.tsx`:
+
+1. The `Actions` interface — add:
+
+```ts
+interface Actions {
+  getCustomerColumns: () => ColumnDef<any, any>[];
+  getCustomerTable: () => Table<any>;
+  debounceSetGlobalFilter: Scheduled<[value: string]>;
+  departmentFilter: {
+    value: () => number;
+    setValue: (id: number) => void;
+    options: () => MetadictOption[];
+  };
+}
+```
+
+2. In the provider, extend the existing `useAuth()` destructure and add the signal + handler (place near `smu`):
+
+```tsx
+  const [, { isSystemAdmin, infoDepartment }] = useAuth();
+
+  const [departmentId, setDepartmentId] = createSignal<number>(
+    infoDepartment() ?? 0,
+  );
+
+  const handleDepartmentChange = (id: number) => {
+    setDepartmentId(id);
+    smu.mutate(id === 0 ? {} : { department_id: id });
+  };
+```
+
+3. In `FormActionsFeature.createTable`, expose it via `tableExActions` (next to the existing `getSalesrepOptions`):
+
+```tsx
+      table.tableExActions = {
+        getSalesrepOptions,
+        getMetadictForTableName,
+        departmentFilter: {
+          value: departmentId,
+          setValue: handleDepartmentChange,
+          options: () => props.metadictOptions?.data ?? [],
+        },
+      };
+```
+
+(If `getMetadictForTableName` is not already in `tableExActions`, add it alongside — it already exists in the provider scope.)
+
+- [ ] **Step 4: Render the filter in the customer toolbar**
+
+In `src/pages/admin/customer/widgets/data-table.tsx`:
+
+1. Destructure `departmentFilter`:
+
+```tsx
+  const {
+    createMutater,
+    syncMutater,
+    onChangeDate,
+    tableStore: [store, setStore],
+  } = table.tableActions!;
+  const { departmentFilter } = table.tableExActions!;
+```
+
+2. Add the component to `TableToolbar` children (before the global-filter `TextField`):
+
+```tsx
+          <DepartmentFilter
+            options={departmentFilter.options()}
+            value={departmentFilter.value()}
+            onChange={departmentFilter.setValue}
+          />
+```
+
+3. Add the import at the top:
+
+```tsx
+import DepartmentFilter from "~/components/datatable/DepartmentFilter";
+```
+
+- [ ] **Step 5: Initial query carries the department param**
+
+In `src/pages/admin/customer/Customer.tsx`:
+
+1. Add imports: `useAuth` and `CustomerFilter`:
+
+```tsx
+import { CustomerFilter } from "~/models";
+import { useAuth } from "~/pages/auth/context";
+```
+
+2. Replace the query creation:
+
+```tsx
+const [, { infoDepartment }] = useAuth();
+
+const initialDepartmentParams = (): CustomerFilter => {
+  const dept = infoDepartment();
+  return dept ? { department_id: dept } : {};
+};
+
+const query = useQuery(() => customersQuery(initialDepartmentParams()));
+```
+
+- [ ] **Step 6: Typecheck + unit tests still pass**
+
+```bash
+npx tsc --noEmit
+npm test -- DepartmentFilter
+```
+
+Expected: no type errors; DepartmentFilter tests still PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/models/netsuite/customer.ts src/routes/admin/customer.tsx src/pages/admin/customer/
+git commit -m "feat: department dropdown filter on customer page"
+```
+
+---
+
+### Task 3: Sales-order page wiring
+
+**Files:**
+- Modify: `src/routes/admin/sales-order.tsx` (SALES_ORDER_METADICT_KEYS)
+- Modify: `src/pages/admin/sales-order/widgets/context.tsx` (signal + smu wiring + tableExActions)
+- Modify: `src/pages/admin/sales-order/widgets/data-table.tsx` (render DepartmentFilter)
+- Modify: `src/pages/admin/sales-order/SalesOrder.tsx` (initial query params)
+
+**Interfaces:**
+- Consumes: `DepartmentFilter` (Task 1); backend param `department` (exists on `SalesOrderFilter`).
+- Produces: sales-order list server-search with `department` param; initial list filtered for non-managers.
+
+- [ ] **Step 1: Add departments to metadict keys**
+
+In `src/routes/admin/sales-order.tsx`, uncomment `"departments"` in `SALES_ORDER_METADICT_KEYS`:
+
+```ts
+export const SALES_ORDER_METADICT_KEYS: NsTableNames = [
+  // ...existing keys...
+  "departments",
+];
+```
+
+- [ ] **Step 2: Wire the filter in the sales-order context**
+
+In `src/pages/admin/sales-order/widgets/context.tsx` (mirror Task 2 Step 3; `SalesOrderFilter` already has `department` via `Partial<SalesOrder>`):
+
+1. Add to the `Actions` interface:
+
+```ts
+interface Actions {
+  getSalesOrderColumns: () => ColumnDef<any, any>[];
+  getSalesOrderTable: () => Table<any>;
+  debounceSetGlobalFilter: Scheduled<[value: string]>;
+  departmentFilter: {
+    value: () => number;
+    setValue: (id: number) => void;
+    options: () => MetadictOption[];
+  };
+}
+```
+
+2. In the provider (the existing `useAuth()` destructure is `const [, { isSystemAdmin }] = useAuth();` — extend it) and add the signal + handler:
+
+```tsx
+  const [, { isSystemAdmin, infoDepartment }] = useAuth();
+
+  const [departmentId, setDepartmentId] = createSignal<number>(
+    infoDepartment() ?? 0,
+  );
+
+  const handleDepartmentChange = (id: number) => {
+    setDepartmentId(id);
+    smu.mutate(id === 0 ? {} : { department: id });
+  };
+```
+
+3. In `FormActionsFeature.createTable`, expose via `tableExActions` (find the existing `tableExActions` block and add):
+
+```tsx
+      table.tableExActions = {
+        // ...existing entries...
+        departmentFilter: {
+          value: departmentId,
+          setValue: handleDepartmentChange,
+          options: () => props.metadictOptions?.data ?? [],
+        },
+      };
+```
+
+- [ ] **Step 3: Render the filter in the sales-order toolbar**
+
+In `src/pages/admin/sales-order/widgets/data-table.tsx` (mirror Task 2 Step 4):
+
+1. Destructure `departmentFilter` from `table.tableExActions!`.
+2. Add `<DepartmentFilter options={...} value={...} onChange={...} />` inside `TableToolbar` children.
+3. Add the import.
+
+- [ ] **Step 4: Initial query carries the department param**
+
+In `src/pages/admin/sales-order/SalesOrder.tsx` (mirror Task 2 Step 5):
+
+```tsx
+const [, { infoDepartment }] = useAuth();
+
+const initialDepartmentParams = (): SalesOrderFilter => {
+  const dept = infoDepartment();
+  return dept ? { department: dept } : {};
+};
+
+const query = useQuery(() => salesOrdersQuery(initialDepartmentParams()));
+```
+
+Add imports for `SalesOrderFilter` and `useAuth` as needed.
+
+- [ ] **Step 5: Typecheck**
+
+```bash
+npx tsc --noEmit
+```
+
+Expected: no type errors.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/routes/admin/sales-order.tsx src/pages/admin/sales-order/
+git commit -m "feat: department dropdown filter on sales-order page"
+```
+
+---
+
+### Task 4: E2E + full verification
+
+**Files:**
+- Create: `e2e/department-filter.spec.cjs`
+- No other changes unless fallout fixes are needed.
+
+**Interfaces:** n/a — end-to-end contract check.
+
+- [ ] **Step 1: Write the e2e spec**
+
+Create `e2e/department-filter.spec.cjs` (mirrors the login pattern of `e2e/session-expiry.spec.cjs`):
+
+```js
+// @ts-check
+const { test, expect } = require("playwright/test");
+
+/**
+ * 部門下拉過濾 E2E（docs/superpowers/specs/2026-08-01-frontend-department-filter-design.md）
+ * 管理者（ssd@sowinsoft.com）場景完整驗證；非管理者場景需 fixture 帳號（見檔尾註解）。
+ */
+
+const BASE = "http://localhost:3000";
+const API = "http://localhost:3080";
+
+const MANAGER_EMAIL = "ssd@sowinsoft.com";
+const MANAGER_PASSWORD = "sowinsoft#29157352";
+// ssd 的部門：-16888 "Sowinsoft"
+const MANAGER_DEPT_ID = -16888;
+const MANAGER_DEPT_NAME = "Sowinsoft";
+
+async function apiLogin(page, email, password) {
+  const r = await page.request.post(
+    `${API}/api/v1/authentication/login/salesrep`,
+    {
+      headers: { "Content-Type": "application/json" },
+      data: { email, password },
+    },
+  );
+  expect(r.status()).toBe(200);
+}
+
+/** 用 /me 的真實回傳注入 auth_state，讓前端 useAuth 讀得到 salesrep.department / is_manager */
+async function seedFrontendAuth(page) {
+  const me = await page.request.get(`${API}/api/v1/authentication/me`);
+  expect(me.status()).toBe(200);
+  const info = await me.json();
+  await page.goto(`${BASE}/signin`);
+  await page.evaluate(
+    (info) => {
+      localStorage.setItem(
+        "auth_state",
+        JSON.stringify({ isAuth: true, info }),
+      );
+    },
+    info,
+  );
+  await page.reload();
+  await page.waitForTimeout(1500);
+}
+
+test.describe("manager: department dropdown filter", () => {
+  test.beforeEach(async ({ page }) => {
+    await apiLogin(page, MANAGER_EMAIL, MANAGER_PASSWORD);
+    await seedFrontendAuth(page);
+  });
+
+  test("customer page: dropdown enabled, defaults to own department, filters by department_id", async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/admin/customer`);
+
+    // 下拉預設 = 自己部門
+    const trigger = page.getByRole("button", { name: MANAGER_DEPT_NAME });
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toBeEnabled();
+
+    // 開啟後有「全部部門」+ 部門選項
+    await trigger.click();
+    await expect(page.getByText("全部部門")).toBeVisible();
+
+    // 切到「全部部門」→ 列表請求不含 department_id（攔截最後一次 list 請求）
+    const listReq = page.waitForRequest(
+      (r) =>
+        r.url().includes("/api/v1/customers") && r.method() === "GET",
+    );
+    await page.getByText("全部部門").click();
+    const req = await listReq;
+    expect(req.url()).not.toContain("department_id=");
+  });
+
+  test("sales-order page: dropdown enabled, defaults to own department, filters by department", async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/admin/sales-orders`);
+
+    const trigger = page.getByRole("button", { name: MANAGER_DEPT_NAME });
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toBeEnabled();
+
+    await trigger.click();
+    await expect(page.getByText("全部部門")).toBeVisible();
+  });
+});
+
+test.describe("non-manager: dropdown locked to own department", () => {
+  // 需要 fixture 帳號：非管理者 salesrep（department = 自己的部門）。
+  // 建立方式（一次性，於 dev DB 執行）：
+  //   INSERT INTO salesreps (internal_id, last_modified_date, created_at, updated_at,
+  //                          email, salesrep_account, is_inactive, is_salesrep, department_id)
+  //   VALUES (90001, now(), now(), now(), 'dept-filter-user@example.com',
+  //           'dept-filter-user@example.com', false, true, -16888);
+  //   -- + credential（密碼雜湊，沿用 seeder 的 getHashPw 流程）→ 登入後 is_manager=false
+  // 設定環境變數 DEPT_FILTER_USER / DEPT_FILTER_PASS 後此組測試才會執行。
+  const email = process.env.DEPT_FILTER_USER;
+  const password = process.env.DEPT_FILTER_PASS;
+
+  test.skip(!email || !password, "DEPT_FILTER_USER/PASS 未設定");
+
+  test("customer page: dropdown disabled and list filtered to own department", async ({
+    page,
+  }) => {
+    await apiLogin(page, email, password);
+    await seedFrontendAuth(page);
+    await page.goto(`${BASE}/admin/customer`);
+
+    const trigger = page.getByRole("button", { name: "部門過濾" });
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toBeDisabled();
+  });
+});
+```
+
+- [ ] **Step 2: Run the full unit suite + typecheck + build**
+
+Requires backend + frontend dev servers running for e2e; the first three commands are local:
+
+```bash
+npm test
+npx tsc --noEmit
+npm run build
+```
+
+Expected: all PASS (vitest), no type errors, build succeeds.
+
+- [ ] **Step 3: Run the e2e spec** (servers must be up: backend on :3080, frontend on :3000)
+
+```bash
+npm run test:e2e -- e2e/department-filter.spec.cjs
+```
+
+Expected: manager scenarios PASS. The non-manager scenario is skipped unless `DEPT_FILTER_USER`/`DEPT_FILTER_PASS` are set.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add e2e/department-filter.spec.cjs
+git commit -m "test: e2e for department dropdown filter"
+```
+
+- [ ] **Step 5: Report**
+
+Summarize: component behavior, both pages' wiring, filter params (`department_id` vs `department`), test results, and the documented fixture setup for the non-manager e2e.

@@ -81,7 +81,7 @@ onChange(id) ──> smu.mutate({ department_id | department: id })  ──> fet
 
 ## 錯誤處理
 
-- 部門查詢失敗：沿用該頁既有 mutation error toast；下拉值回滾至上一個有效值。
+- 部門查詢失敗：沿用該頁既有 `smu` mutation 的 error toast（與其他 column filter 行為一致，不做下拉值回滾）。
 - metadict 部門資料未載入：下拉 disabled（不阻擋頁面其他功能）。
 - `infoDepartment` 無值：非管理者不帶部門參數（無法限縮，記錄於 spec）；管理者預設「全部」。
 
