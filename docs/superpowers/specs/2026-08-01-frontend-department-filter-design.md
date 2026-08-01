@@ -13,6 +13,7 @@
 
 - **filter 參數統一為 `department_id`**（A，2026-08-02）：customer 與 sales-order 兩頁都用 `department_id`；sales_orders 後端移除舊的 `department` 參數（`SalesOrderFilter.Department` 刪除，predicate 改用 `Nsfilter.DepartmentID`）；dispatch sync 亦改 `department_id`。
 - **customer 部門篩選語意**（B，2026-08-02）：改為「客戶**自己的** `department_id` == X OR（`department_id` 為 NULL 且 salesrep 部門 == X）」——own 優先，僅舊資料（NULL）以 salesrep 補齊；不再純 salesrep-based。已用 sqlite 驗證（own 命中、NULL+fallback 命中、own 已設定且不同於 salesrep 時只依 own）。
+- **is_search 設計決策**（B 風格統一，2026-08-02）：部門 predicate 放回 `predicateCustomer`/`predicateSalesOrder`（與其他 filter 一致），**前端 list query 一律送 `is_search=true`**（含 department 時）。代價：忘了送 is_search 的呼叫端會靜默失去所有 filter（foot-gun，e2e 已斷言 URL 含 `is_search=true` 防回歸）。
 
 先例盤點：
 
