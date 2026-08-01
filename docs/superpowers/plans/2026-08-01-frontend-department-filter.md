@@ -410,17 +410,21 @@ import { CustomerFilter } from "~/models";
 import { useAuth } from "~/pages/auth/context";
 ```
 
-2. Replace the query creation:
+2. Replace the query creation (REVISED 2026-08-02: manager defaults to 全部 (0); only non-managers carry their own department — the original own-department default made system-admin users see a near-empty list):
 
 ```tsx
-const [, { infoDepartment }] = useAuth();
+const [, { isManager, infoDepartment }] = useAuth();
 
-const initialDepartmentParams = (): CustomerFilter => {
-  const dept = infoDepartment();
-  return dept ? { department_id: dept } : {};
-};
+const initialDepartmentId = () =>
+  isManager() ? 0 : (infoDepartment() ?? 0);
 
-const query = useQuery(() => customersQuery(initialDepartmentParams()));
+const [departmentId, setDepartmentId] = createSignal<number>(
+  initialDepartmentId(),
+);
+
+const query = useQuery(() =>
+  customersQuery(departmentId() ? { department_id: departmentId() } : {}),
+);
 ```
 
 - [ ] **Step 6: Typecheck + unit tests still pass**
@@ -444,107 +448,83 @@ git commit -m "feat: department dropdown filter on customer page"
 ### Task 3: Sales-order page wiring
 
 **Files:**
-- Modify: `src/routes/admin/sales-order.tsx` (SALES_ORDER_METADICT_KEYS)
-- Modify: `src/pages/admin/sales-order/widgets/context.tsx` (signal + smu wiring + tableExActions)
+- Modify: `src/routes/admin/sales-order.tsx` (SALES_ORDER_METADICT_KEYS; drop unfiltered prefetch)
+- Modify: `src/pages/admin/sales-order/widgets/context.tsx` (props + tableExActions exposure; NO internal signal/smu — see Task 2 fix)
 - Modify: `src/pages/admin/sales-order/widgets/data-table.tsx` (render DepartmentFilter)
-- Modify: `src/pages/admin/sales-order/SalesOrder.tsx` (initial query params)
+- Modify: `src/pages/admin/sales-order/SalesOrder.tsx` (department signal + reactive query + provider props)
 
 **Interfaces:**
 - Consumes: `DepartmentFilter` (Task 1); backend param `department` (exists on `SalesOrderFilter`).
-- Produces: sales-order list server-search with `department` param; initial list filtered for non-managers.
+- Produces: sales-order list query REACTIVE to the department signal (key change → refetch); initial list filtered for non-managers; no unfiltered loader prefetch.
+
+**CORRECTED WIRING (follows the Task 2 Critical fix — do NOT use the smu-cache-write pattern):** the page component owns the department signal and the rendered query reads it, so a dropdown change refetches the table.
 
 - [ ] **Step 1: Add departments to metadict keys**
 
-In `src/routes/admin/sales-order.tsx`, uncomment `"departments"` in `SALES_ORDER_METADICT_KEYS`:
+In `src/routes/admin/sales-order.tsx`, uncomment `"departments"` in `SALES_ORDER_METADICT_KEYS` (and `"salesreps"` if the page needs it — check the page's existing usage; default: only `"departments"`).
 
-```ts
-export const SALES_ORDER_METADICT_KEYS: NsTableNames = [
-  // ...existing keys...
-  "departments",
-];
+- [ ] **Step 2: Drop the unfiltered prefetch in the loader**
+
+In `src/routes/admin/sales-order.tsx`, remove `await queryClient.ensureQueryData(salesOrdersQuery());` (keep the deferred prefetches; drop the `salesOrdersQuery` import if it becomes unused).
+
+- [ ] **Step 3: Lift the department signal into the page**
+
+In `src/pages/admin/sales-order/SalesOrder.tsx` (mirror Task 2's fix — read `src/pages/admin/customer/Customer.tsx` for the exact committed pattern):
+
+```tsx
+const [, { infoDepartment }] = useAuth();
+
+const [departmentId, setDepartmentId] = createSignal<number>(
+  infoDepartment() ?? 0,
+);
+
+const query = useQuery(() =>
+  salesOrdersQuery(departmentId() ? { department: departmentId() } : {}),
+);
 ```
 
-- [ ] **Step 2: Wire the filter in the sales-order context**
+and pass `departmentValue={departmentId()}` + `onDepartmentChange={setDepartmentId}` to `SalesOrderDatatableProvider`. (Add imports: `createSignal` from solid-js, `useAuth`, `SalesOrderFilter` if referenced.)
 
-In `src/pages/admin/sales-order/widgets/context.tsx` (mirror Task 2 Step 3; `SalesOrderFilter` already has `department` via `Partial<SalesOrder>`):
+- [ ] **Step 4: Wire the context (props-driven, no internal signal)**
 
-1. Add to the `Actions` interface:
+In `src/pages/admin/sales-order/widgets/context.tsx` (mirror Task 2's fix — read the committed customer context):
+
+1. Add `departmentValue: number` and `onDepartmentChange: (id: number) => void` to `DataTableProps`.
+2. Add to the `Actions` interface:
 
 ```ts
-interface Actions {
-  getSalesOrderColumns: () => ColumnDef<any, any>[];
-  getSalesOrderTable: () => Table<any>;
-  debounceSetGlobalFilter: Scheduled<[value: string]>;
   departmentFilter: {
     value: () => number;
     setValue: (id: number) => void;
     options: () => MetadictOption[];
   };
-}
 ```
 
-2. In the provider (the existing `useAuth()` destructure is `const [, { isSystemAdmin }] = useAuth();` — extend it) and add the signal + handler:
+3. Expose `departmentFilter` in both the provider's `actions` object and `tableExActions`:
 
 ```tsx
-  const [, { isSystemAdmin, infoDepartment }] = useAuth();
-
-  const [departmentId, setDepartmentId] = createSignal<number>(
-    infoDepartment() ?? 0,
-  );
-
-  const handleDepartmentChange = (id: number) => {
-    setDepartmentId(id);
-    smu.mutate(id === 0 ? {} : { department: id });
-  };
+      departmentFilter: {
+        value: () => props.departmentValue,
+        setValue: props.onDepartmentChange,
+        options: () => props.metadictOptions?.data ?? [],
+      },
 ```
 
-3. In `FormActionsFeature.createTable`, expose via `tableExActions` (find the existing `tableExActions` block and add):
+Do NOT add a department signal or smu wiring in the context — the page's query already reacts to the signal.
 
-```tsx
-      table.tableExActions = {
-        // ...existing entries...
-        departmentFilter: {
-          value: departmentId,
-          setValue: handleDepartmentChange,
-          options: () => props.metadictOptions?.data ?? [],
-        },
-      };
-```
+- [ ] **Step 5: Render the filter in the sales-order toolbar**
 
-- [ ] **Step 3: Render the filter in the sales-order toolbar**
+In `src/pages/admin/sales-order/widgets/data-table.tsx` (mirror Task 2 Step 4): destructure `departmentFilter` from `table.tableExActions!`, add `<DepartmentFilter options={...} value={...} onChange={...} />` inside `TableToolbar` children, add the import.
 
-In `src/pages/admin/sales-order/widgets/data-table.tsx` (mirror Task 2 Step 4):
-
-1. Destructure `departmentFilter` from `table.tableExActions!`.
-2. Add `<DepartmentFilter options={...} value={...} onChange={...} />` inside `TableToolbar` children.
-3. Add the import.
-
-- [ ] **Step 4: Initial query carries the department param**
-
-In `src/pages/admin/sales-order/SalesOrder.tsx` (mirror Task 2 Step 5):
-
-```tsx
-const [, { infoDepartment }] = useAuth();
-
-const initialDepartmentParams = (): SalesOrderFilter => {
-  const dept = infoDepartment();
-  return dept ? { department: dept } : {};
-};
-
-const query = useQuery(() => salesOrdersQuery(initialDepartmentParams()));
-```
-
-Add imports for `SalesOrderFilter` and `useAuth` as needed.
-
-- [ ] **Step 5: Typecheck**
+- [ ] **Step 6: Typecheck**
 
 ```bash
 npx tsc --noEmit
 ```
 
-Expected: no type errors.
+Expected: no NEW errors in touched files (9 pre-existing errors exist elsewhere on the branch).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/routes/admin/sales-order.tsx src/pages/admin/sales-order/

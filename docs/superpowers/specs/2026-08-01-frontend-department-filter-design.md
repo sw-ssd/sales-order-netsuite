@@ -40,10 +40,10 @@
 ## 核心行為
 
 - **非管理者**：下拉 disabled，值 = 自己部門（`infoDepartment`），永不觸發 `onChange`；customer/sales-order 列表查詢恆帶 `department_id`（customer）/ `department`（sales-order）= 自己部門；dispatch 維持 client-side 限縮。
-- **管理者**：下拉 enabled，選項 =（customer/sales-order）「全部部門」(0) + 所有部門，預設自己部門；dispatch 無「全部」選項。選「全部部門」→ 省略部門參數。
+- **管理者**：下拉 enabled，選項 =（customer/sales-order）「全部部門」(0) + 所有部門，**預設「全部部門」**（進頁面看全部，可下拉縮小）；dispatch 無「全部」選項。選「全部部門」→ 省略部門參數。
 - **inactive 部門**：所有頁面下拉都顯示，反白（淡化）+ disabled 不可選；非管理者鎖定的自己部門若為 inactive 仍正常顯示與鎖定。
-- **變更時**：customer/sales-order 觸發該頁既有 server-search（`smu`）；dispatch 只更新選定部門 signal（board 重組，client-side）。
-- **初始載入**：customer/sales-order 頁面基礎 query 依 auth 帶入初始部門參數；dispatch 沿用 `departmentTabDefault` 預設邏輯（自己部門，不在選項時 fallback `DEFAULT_DEPARTMENT`）。
+- **變更時**：customer/sales-order 頁面的 department signal 改變 → 頁面 `useQuery` 的 query key 改變 → 直接 refetch（**不經 smu/cache-write**——smu 會把結果寫進無人觀察的 cache key，導致表格不更新，Task 2 review 已證實並修正）；dispatch 只更新選定部門 signal（board 重組，client-side）。
+- **初始載入**：customer/sales-order 頁面基礎 query——管理者預設「全部」（不帶部門參數）；非管理者帶自己部門（`infoDepartment`）。dispatch 沿用 `departmentTabDefault` 預設邏輯。
 
 ## 架構與元件
 
@@ -88,9 +88,11 @@
 auth (isManager / infoDepartment) ──> DepartmentFilter（選項來自 metadictOptions["departments"]）
         │ 非管理者：disabled 鎖定自己部門；管理者：可選 全部/單一部門
         ▼
-onChange(id) ──> smu.mutate({ department_id | department: id })  ──> fetchQuery(xxxQuery) ──> listInvalidate
+onChange(id) ──> 頁面 department signal（Customer.tsx / SalesOrder.tsx 持有）
         ▼
-列表 query（含部門參數）──> 後端既有 predicate（customers: DepartmentID via salesrep；sales_orders: DepartmentIDEQ）
+useQuery(() => xxxQuery(signal ? { department_id | department: signal } : {}))
+        └─ query key 隨 signal 改變 ──> refetch ──> 後端既有 predicate
+           （customers: DepartmentID via salesrep；sales_orders: DepartmentIDEQ）
 ```
 
 ## 錯誤處理
@@ -103,7 +105,7 @@ onChange(id) ──> smu.mutate({ department_id | department: id })  ──> fet
 
 - **vitest unit（元件）**：
   - 非管理者：disabled、值 = 自己部門、`onChange` 不觸發。
-  - 管理者：含「全部部門」+ 部門、預設自己部門、選擇後 `onChange` 觸發；`showAll=false` 時無「全部部門」。
+  - 管理者：含「全部部門」+ 部門、**預設「全部部門」（value 0）**、選擇後 `onChange` 觸發；`showAll=false` 時無「全部部門」。
   - **inactive 部門：顯示但 disabled（反白樣式）、不可選取**。
   - `infoDepartment` 缺失與 options 未載入的 fallback。
 - **playwright e2e**：
@@ -120,4 +122,4 @@ onChange(id) ──> smu.mutate({ department_id | department: id })  ──> fet
 
 ## 待決問題
 
-- 無（使用者已確認：純前端 UX、管理者預設自己部門且有「全部部門」選項）。
+- 無（使用者已確認：純前端 UX、管理者預設「全部部門」、非管理者鎖自己部門；後續實測發現管理者預設自己部門會讓系統管理員（-16888）進頁面近乎全空，故改為預設全部）。
