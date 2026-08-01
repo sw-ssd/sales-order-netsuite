@@ -9,7 +9,12 @@
 - dispatch 頁由 tab 風格改為同一下拉風格（per-department board，無「全部」選項）。
 - **inactive 部門**：dropdown 中顯示但**反白（淡化樣式）+ 不可選取**（管理者亦同）；非管理者若自己部門為 inactive 仍顯示並鎖定。
 
-現況盤點：
+現況盤點（後續修正）：
+
+- **filter 參數統一為 `department_id`**（A，2026-08-02）：customer 與 sales-order 兩頁都用 `department_id`；sales_orders 後端移除舊的 `department` 參數（`SalesOrderFilter.Department` 刪除，predicate 改用 `Nsfilter.DepartmentID`）；dispatch sync 亦改 `department_id`。
+- **customer 部門篩選語意**（B，2026-08-02）：改為「客戶**自己的** `department_id` == X OR（`department_id` 為 NULL 且 salesrep 部門 == X）」——own 優先，僅舊資料（NULL）以 salesrep 補齊；不再純 salesrep-based。已用 sqlite 驗證（own 命中、NULL+fallback 命中、own 已設定且不同於 salesrep 時只依 own）。
+
+先例盤點：
 
 - **先例**：dispatch 頁已有部門 tab + `disabledDepartment` 邏輯（`isManager()` 管理者全開、一般用戶鎖自己部門）——純前端 UX，後端無 viewer 部門強制。本次沿用同一模式（使用者已確認**純前端**，不做後端強制）。
 - **auth state**（`src/pages/auth/context.tsx`）：`isManager()` 讀 `authState.info?.salesrep?.session_info_base?.is_manager`；`infoDepartment()` 讀 `authState.info?.salesrep?.department`（ProfileCard 另有 `department_name`）。
