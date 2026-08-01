@@ -43,7 +43,7 @@
 - **寫入（鏡像）**：customer 每次寫入（create / sync / update，皆為 OpCreate upsert）時，若 mutation 未明確設定 `department_id`，則以 `m.Salesrep()` 查 `Salesrep.DepartmentID` 並 `SetDepartmentID`。明確設定優先（目前無任何程式會明確設定）。
 - **讀取**：`Resource` / `ResourceOption` 優先讀 customer 自己的 `belong_department`；未設定時 fallback 到 salesrep 的部門。
 - **篩選**：維持 salesrep-based 篩選（在鏡像語意下，對已補齊與未補齊資料皆正確，零回歸）。
-- **排序**：支援 `sort=department` → `customer.ByDepartmentID`。
+- **排序**：支援 `sort=department_id` → `customer.ByDepartmentID`（對應 DB field 名稱；前端表格 `department` 欄位目前未接 sort）。
 
 ## 架構與元件
 

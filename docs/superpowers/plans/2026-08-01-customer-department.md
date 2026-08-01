@@ -392,7 +392,7 @@ git commit -m "feat: read customer's own department with salesrep fallback"
 
 **Interfaces:**
 - Consumes: `f.Sort` (`[]string`, format `"col:asc"` / `"col:desc"` / bare `"col"`, parsed by `tools.ArrayToMapString`); `customer.FieldDepartmentID`.
-- Produces: `sort=department` orders by `customers.department_id` (NULLs last) — consumed by the frontend table column `department`.
+- Produces: `sort=department_id` orders by `customers.department_id` (NULLs last). Sort keys follow DB field names (frontend `department` column is display-only today and does not send sort; filter param is also `department_id`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -440,11 +440,11 @@ func (r *RepoCustomerSuite) TestListCustomersSortByDepartment() {
 		mkReq(10002, "AAA-SortB", constants.DefaultSalesrepID))
 	r.Require().NoError(err)
 
-	f := &Filter{
+		f := &Filter{
 		Filter: &filter.Filter{
 			Limit:    10,
 			Offset:   0,
-			Sort:     []string{"department:asc"},
+			Sort:     []string{"department_id:asc"},
 			IsSearch: true,
 		},
 		Nsfilter:       &filter.Nsfilter{},
@@ -456,7 +456,7 @@ func (r *RepoCustomerSuite) TestListCustomersSortByDepartment() {
 	r.Less(list[0].DepartmentID, list[1].DepartmentID, "asc: -16888 before 6")
 	r.Equal(int64(10001), list[0].ID)
 
-	f.Filter.Sort = []string{"department:desc"}
+	f.Filter.Sort = []string{"department_id:desc"}
 	list, total, err = r.repo.Search(r.defCtx, f)
 	r.Require().NoError(err)
 	r.Equal(2, total)
@@ -473,7 +473,9 @@ Note: `mkReq` builds a fresh request per customer — do NOT shallow-copy `r.req
 go test ./internal/domain/customers/ -run "TestRepoCustomerSuite/TestListCustomersSortByDepartment" -v
 ```
 
-Expected: FAILS — `department` is not a case in `customerOrder`, so no order func is applied and the default `updated_at` order is used.
+Expected: FAILS — `department_id` is not a case in `customerOrder`, so no order func is applied and the default `updated_at` order is used.
+
+Note: sorting by ANY key was previously broken repo-wide — `customerOrder` starts with `make([]customer.OrderOption, len(sorts))`, which seeds nil entries that panic when applied (`order(selector)` nil deref). Step 3 below also fixes that line to `make([]customer.OrderOption, 0, len(sorts))`. The same `make([]T, len(sorts))` pattern exists in sales_orders/departments/salesreps/items domains (out of scope here; flag to reviewer).
 
 - [ ] **Step 3: Implement**
 
