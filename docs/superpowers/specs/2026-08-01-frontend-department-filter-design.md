@@ -41,7 +41,9 @@
 
 - **非管理者**：下拉 disabled，值 = 自己部門（`infoDepartment`），永不觸發 `onChange`；customer/sales-order 列表查詢恆帶 `department_id`（customer）/ `department`（sales-order）= 自己部門；dispatch 維持 client-side 限縮。
 - **管理者**：下拉 enabled，選項 =（customer/sales-order）「全部部門」(0) + 所有部門，**預設「全部部門」**（進頁面看全部，可下拉縮小）；dispatch 無「全部」選項。選「全部部門」→ 省略部門參數。
-- **inactive 部門**：所有頁面下拉都顯示，反白（淡化）+ disabled 不可選；非管理者鎖定的自己部門若為 inactive 仍正常顯示與鎖定。
+- **inactive 部門**：所有頁面下拉都顯示，反白（淡化）+ disabled 不可選；**排序在選單最下方**。非管理者鎖定的自己部門若為 inactive 仍正常顯示與鎖定。
+- **系統管理員部門（SYSTEM_ADMIN_DEPARTMENT = -16888「Sowinsoft LTD」）**：所有頁面下拉都排除（含非管理者鎖定查詢）。
+- **非管理者測試帳號**：`project001@hexagonty.com / 11111111`（部門 6 新北分部、is_manager=false），e2e 直接使用。
 - **變更時**：customer/sales-order 頁面的 department signal 改變 → 頁面 `useQuery` 的 query key 改變 → 直接 refetch（**不經 smu/cache-write**——smu 會把結果寫進無人觀察的 cache key，導致表格不更新，Task 2 review 已證實並修正）；dispatch 只更新選定部門 signal（board 重組，client-side）。
 - **初始載入**：customer/sales-order 頁面基礎 query——管理者預設「全部」（不帶部門參數）；非管理者帶自己部門（`infoDepartment`）。dispatch 沿用 `departmentTabDefault` 預設邏輯。
 
