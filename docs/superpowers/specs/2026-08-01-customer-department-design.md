@@ -9,11 +9,12 @@
 - `ent/schema/customer.go` 的 `Mixin()` 已加入 `DepartmentMixin{}`，帶來 `department_id` 欄位與 `belong_department` edge（M2O、可空），`ent/gen` 生成碼已同步（`SetDepartmentID`、`WithBelongDepartment`、`customer.FieldDepartmentID` 等皆已存在）。
 - 另新增一個 post-mutate hook（`ent.OpUpdate|ent.OpUpdateOne`），意圖在更新時將 salesrep 的部門複製到 customer。
 
-經查證，該 hook 是壞的，且主流程不會觸發：
+經查證，該 hook 是壞的，且主流程不會觸發（已用 sqlite 實測驗證）：
 
 1. **post-mutate 寫不進 DB**：`next.Mutate(ctx, m)` 執行後 SQL 已送出，之後 `m.SetDepartmentID(...)` 只影響記憶體中的 entity，不會更新資料列。
-2. **`crpm.Edges.OwnerSalesrepOrErr()` 會回傳 `NotLoadedError`**：`UpdateOneID` 未 eager-load `owner_salesrep` edge 時，`CustomerEdges.loadedTypes[3]` 為 false → 回傳 error → hook 直接 `return nil, err` → 任何直接本地更新（如 `RecoverCustomer`）都會失敗。
+2. **`crpm.Edges.OwnerSalesrepOrErr()` 會回傳 `NotLoadedError`**：`UpdateOneID` 未 eager-load `owner_salesrep` edge 時，`CustomerEdges.loadedTypes[3]` 為 false → 回傳 `NotLoadedError` → hook 直接 `return nil, err`。
 3. **掛錯 operation**：客戶的所有寫入（create / NetSuite 同步 / update）都走 `repo.CreateUpsertCustomersWithAddressBooksAndContacts` → `OnConflictColumns(customer.FieldID).UpdateNewValues()`，這是 **OpCreate** 的 upsert，`OpUpdate|OpUpdateOne` hook 根本不會執行。
+4. **目前是休眠狀態（未爆彈）**：`ent/gen/runtime/runtime.go` 只縫合 `customerHooks[0]`（credential hook）到 `customer.Hooks[1]`（`customer.Hooks [2]ent.Hook` 陣列在 department hook 加入「之前」產生，stale）。實測 `len(client.Customer.Hooks()) == 2`，`UpdateOneID(...).SetOrClearDeletedAt(nil)` 目前**不報錯**。**下次執行 `task ent:gen` / `go generate ./ent` 重新產生後**，陣列變 `[3]ent.Hook`、壞 hook 被縫合啟用，`RecoverCustomer`（及任何未設 department_id 的 OpUpdate/OpUpdateOne）會以 `owner_salesrep edge was not loaded` 失敗。
 
 其他現況：
 
@@ -154,7 +155,7 @@ GET /api/.../customers 回應：department / department_name
 ## 風險 / 取捨
 
 - **鏡像語意下的自我修正**：salesrep 換部門後，customer 在下一次該客戶被同步/更新時自動跟上；在此之前回應可能短暫顯示舊部門（fallback 讀 own edge 已設定 → 顯示舊值，直到重寫）。可接受，與「跟隨 salesrep」語意一致。
-- **既有 hook 是地雷**：若本設計未執行（僅保留現狀），`RecoverCustomer` 會壞。本設計已將刪除/取代列入。
+- **既有 hook 是未爆彈**：目前休眠（runtime.go stale 未縫合），下次 `task ent:gen` 後啟用並使 `RecoverCustomer` 等 OpUpdate/OpUpdateOne 失敗。本設計已將刪除/取代列入，並要求執行期間在 Task 2 完成前不得重新產生 ent code。
 - **不回寫 NetSuite**：部門僅本地端，NetSuite 重新同步不會覆蓋本地值（upsert 未設 department_id 時 conflict update 不觸碰該欄位；hook 會重設為 salesrep 部門）。
 
 ## 遷移計畫

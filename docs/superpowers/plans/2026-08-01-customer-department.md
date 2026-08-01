@@ -11,7 +11,8 @@
 ## Global Constraints
 
 - Work happens inside the `sales-order-backend` git submodule. All `git` commands in tasks run with `cwd = sales-order-backend`.
-- The uncommitted in-flight diff (ent/schema/customer.go DepartmentMixin + ent/gen regeneration + a broken post-mutate hook) is the foundation — do NOT revert or regenerate ent code (`task ent:gen` / `go generate ./ent` are NOT needed; hooks live in schema, not generated code).
+- The uncommitted in-flight diff (ent/schema/customer.go DepartmentMixin + ent/gen regeneration + a broken post-mutate hook) is the foundation — do NOT revert it.
+- **CRITICAL — do NOT run `task ent:gen` / `go generate ./ent` until Task 2 has replaced the broken hook.** `ent/gen/runtime/runtime.go` is stale: it stitches only `customerHooks[0]` (credential hook) into `customer.Hooks [2]ent.Hook`, so the broken department hook is currently dormant and `RecoverCustomer` works (verified empirically). A regeneration stitches the broken hook in (array grows to 3), and then every `OpUpdateOne` on Customer — including `RecoverCustomer` — fails with `owner_salesrep edge was not loaded`. Task 2's replacement hook is pre-mutate and safe to stitch; after Task 2, regeneration is allowed.
 - Design decisions (user-approved, spec: `docs/superpowers/specs/2026-08-01-customer-department-design.md`):
   - Salesrep-follow only: no API field for department; explicit `department_id` in a mutation wins.
   - Filter stays salesrep-based (`customer.HasOwnerSalesrepWith(salesrep.DepartmentID(...))`) — do NOT change it.
@@ -164,7 +165,7 @@ Expected: `TestCreateCustomerDefaultsDepartmentFromSalesrep` FAILS (`department_
 
 - [ ] **Step 3: Replace the hook**
 
-In `ent/schema/customer.go`:
+In `ent/schema/customer.go` (this is the ONLY task that may be followed by a future `task ent:gen` run; do not regenerate before this step is done):
 
 1. Add import `"github.com/hexagon-maker/sales-order-backend/ent/gen/salesrep"`.
 2. DELETE the entire broken post-mutate hook registered on `ent.OpUpdate|ent.OpUpdateOne` (the one that calls `crpm.Edges.OwnerSalesrepOrErr()` after `next.Mutate`).
