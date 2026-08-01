@@ -49,11 +49,7 @@ type Session struct {
 
 - [ ] **Step 2: 從三個 env 檔移除 `SESSION_REMEMBER_DURATION` 行，並確認 `SESSION_DURATION` 統一為 `12h`**
 
-`.env`、`hexagon.env` 移除：
-```
-SESSION_REMEMBER_DURATION=168h
-```
-`hexagon.env` 的 `SESSION_DURATION` 由 `168h` 改為 `12h`（滑動續期下對日常使用者無感，見設計文件待決問題 1）。`prod.env.hexagon`（App）移除 `SESSION_WARN_BEFORE=300` 該行保留（App 需要），確認無 `SESSION_REMEMBER_DURATION`。
+`.env`、`hexagon.env` 移除 `SESSION_REMEMBER_DURATION=168h`；`hexagon.env` 的 `SESSION_DURATION` 由 `168h` 改為 `12h`（滑動續期下對日常使用者無感，見設計文件待決問題 1）。`prod.env.hexagon`（App）**保留** `SESSION_WARN_BEFORE=300`（App 需要），確認無 `SESSION_REMEMBER_DURATION`。
 
 - [ ] **Step 3: 驗證編譯**
 
