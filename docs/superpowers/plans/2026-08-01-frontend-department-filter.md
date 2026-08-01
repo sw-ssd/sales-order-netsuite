@@ -33,7 +33,7 @@
 - Create: `src/components/datatable/DepartmentFilter.test.tsx`
 
 **Interfaces:**
-- Produces: `DepartmentFilter` component with props `{ options: MetadictOption[]; value: number; onChange: (id: number) => void }` (value `0` = 全部) — consumed by Task 2/3 page toolbars.
+- Produces: `DepartmentFilter` component with props `{ options: MetadictOption[]; value: number; onChange: (id: number) => void; showAll?: boolean }` (value `0` = 全部; `showAll` default `true`, `false` omits the 全部 option; inactive departments are shown but disabled/反白) — consumed by Task 2/3/4 page toolbars.
 
 - [ ] **Step 1: Create the vitest config**
 
@@ -93,7 +93,6 @@ describe("DepartmentFilter", () => {
     const trigger = screen.getByRole("button", { name: "Sowinsoft" });
     expect(trigger).toHaveProperty("disabled", true);
     expect(screen.queryByText("全部部門")).toBeNull();
-    expect(screen.queryByText("Sales")).toBeNull();
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -103,7 +102,7 @@ describe("DepartmentFilter", () => {
     expect(screen.getByRole("button", { name: "無部門" })).toBeTruthy();
   });
 
-  it("manager: default own department, 全部 + active departments listed, onChange fires", async () => {
+  it("manager: default own department, 全部 + departments listed, onChange fires", async () => {
     mocks.isManager.mockReturnValue(true);
     mocks.infoDepartment.mockReturnValue(-16888);
     const onChange = vi.fn();
@@ -114,15 +113,42 @@ describe("DepartmentFilter", () => {
     // default selection shows own department
     expect(screen.getByRole("button", { name: "Sowinsoft" })).toBeTruthy();
 
-    // open the select: 全部部門 + active departments (inactive excluded)
+    // open the select: 全部部門 + all departments (inactive shown too)
     await fireEvent.click(screen.getByRole("button", { name: "Sowinsoft" }));
     expect(screen.getByText("全部部門")).toBeTruthy();
     expect(screen.getByText("Sales")).toBeTruthy();
-    expect(screen.queryByText("Inactive Dept")).toBeNull();
+    expect(screen.getByText("Inactive Dept")).toBeTruthy(); // inactive visible
 
     // selecting 全部部門 fires onChange(0)
     await fireEvent.click(screen.getByText("全部部門"));
     expect(onChange).toHaveBeenCalledWith(0);
+  });
+
+  it("manager with showAll=false: no 全部部門 option", async () => {
+    mocks.isManager.mockReturnValue(true);
+    mocks.infoDepartment.mockReturnValue(-16888);
+    render(() => (
+      <DepartmentFilter options={depts} value={-16888} onChange={vi.fn()} showAll={false} />
+    ));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Sowinsoft" }));
+    expect(screen.queryByText("全部部門")).toBeNull();
+    expect(screen.getByText("Sales")).toBeTruthy();
+  });
+
+  it("inactive department item is disabled (not selectable)", async () => {
+    mocks.isManager.mockReturnValue(true);
+    mocks.infoDepartment.mockReturnValue(-16888);
+    const onChange = vi.fn();
+    render(() => (
+      <DepartmentFilter options={depts} value={-16888} onChange={onChange} />
+    ));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Sowinsoft" }));
+    const inactiveItem = screen.getByText("Inactive Dept");
+    expect(inactiveItem).toHaveProperty("aria-disabled", "true");
+    await fireEvent.click(inactiveItem);
+    expect(onChange).not.toHaveBeenCalled();
   });
 });
 ```
@@ -162,25 +188,29 @@ const ALL_OPTION: MetadictOption = {
 };
 
 interface DepartmentFilterProps {
-  /** departments metas（table_name === "departments"） */
+  /** departments metas（table_name === "departments"；inactive 也會顯示但不可選） */
   options: MetadictOption[];
   /** 目前選取的部門 id；0 = 全部 */
   value: number;
   onChange: (id: number) => void;
+  /** 是否顯示「全部部門」選項；dispatch 頁傳 false */
+  showAll?: boolean;
 }
 
 export const DepartmentFilter: Component<DepartmentFilterProps> = (props) => {
   const [, { isManager, infoDepartment }] = useAuth();
 
   const departments = () =>
-    props.options.filter((o) => o.table_name === "departments" && !o.is_inactive);
+    props.options.filter((o) => o.table_name === "departments");
 
   const manager = () => isManager();
   const ownDeptId = () => infoDepartment();
 
   const selectOptions = () => {
     if (manager()) {
-      return [ALL_OPTION, ...departments()];
+      return props.showAll === false
+        ? departments()
+        : [ALL_OPTION, ...departments()];
     }
     const own = departments().find((o) => o.opt_id === ownDeptId());
     return own ? [own] : [];
@@ -188,13 +218,14 @@ export const DepartmentFilter: Component<DepartmentFilterProps> = (props) => {
 
   const selected = createMemo(() => {
     if (manager()) {
-      return selectOptions().find((o) => o.opt_id === props.value) ?? ALL_OPTION;
+      return selectOptions().find((o) => o.opt_id === props.value) ??
+        (props.showAll === false ? selectOptions()[0] ?? null : ALL_OPTION);
     }
     return selectOptions()[0] ?? null;
   });
 
   const handleChange = (val: MetadictOption | null) => {
-    if (manager() && val) {
+    if (manager() && val && !val.is_inactive) {
       props.onChange(val.opt_id);
     }
   };
@@ -209,7 +240,11 @@ export const DepartmentFilter: Component<DepartmentFilterProps> = (props) => {
       placeholder={manager() ? "全部部門" : "無部門"}
       onChange={handleChange}
       disabled={!manager()}
-      itemComponent={(p) => <SelectItem item={p.item}>{p.item.rawValue.name}</SelectItem>}
+      itemComponent={(p) => (
+        <SelectItem item={p.item} class={p.item.rawValue.is_inactive ? "opacity-50" : undefined}>
+          {p.item.rawValue.name}
+        </SelectItem>
+      )}
     >
       <SelectTrigger aria-label="部門過濾" class="w-[180px]">
         <SelectValue<MetadictOption>>
@@ -518,7 +553,88 @@ git commit -m "feat: department dropdown filter on sales-order page"
 
 ---
 
-### Task 4: E2E + full verification
+### Task 4: Dispatch page conversion (tabs → dropdown)
+
+**Files:**
+- Modify: `src/pages/admin/dispatch/widgets/boards.tsx` (replace department Tabs with DepartmentFilter)
+- Modify: `src/pages/admin/dispatch/widgets/setting-context.tsx` (departmentMetas: stop excluding inactive; keep SYSTEM_ADMIN_DEPARTMENT exclusion)
+- Reference: `src/pages/admin/dispatch/Dispatch.tsx` (no change — data flow stays client-side)
+
+**Interfaces:**
+- Consumes: `DepartmentFilter` with `showAll={false}` (Task 1); existing `departmentMetas`, `departmentTabDefault`, `selectedDepartment`/`department` board state (unchanged semantics).
+- Produces: dispatch page department selection via dropdown instead of tabs; inactive departments visible but 反白/disabled; non-manager locked to own department.
+
+- [ ] **Step 1: Keep inactive departments in `departmentMetas`**
+
+In `src/pages/admin/dispatch/widgets/setting-context.tsx`, change `departmentMetas` to keep `is_inactive` items (the component renders them 反白/disabled):
+
+```tsx
+  const departmentMetas = () =>
+    metadictOptions?.data?.filter(
+      (m) =>
+        m.table_name === "departments" &&
+        m.id !== SYSTEM_ADMIN_DEPARTMENT,
+    ) || [];
+```
+
+(Removed `!m.is_inactive`; kept `m.id !== SYSTEM_ADMIN_DEPARTMENT`.)
+
+- [ ] **Step 2: Replace the department Tabs with the dropdown**
+
+First read `src/pages/admin/dispatch/widgets/boards.tsx` end-to-end (it is ~390 lines) to identify the exact `Tabs`/`TabsList`/`TabsTrigger` department-tab region, the `selectedDepartment`/`department` memos, and where `departmentMetas`/`infoDepartment`/`isManager`/`DEFAULT_DEPARTMENT`/`SYSTEM_ADMIN_DEPARTMENT` come from (some are provided by the settings context; import what is missing in `boards.tsx`).
+
+Then replace the department Tabs block with a single dropdown. The board body and `department` memo stay untouched:
+
+```tsx
+  const departmentTabDefault = departmentMetas().find((d) =>
+    infoDepartment() ? d.id === infoDepartment() : d.id === DEFAULT_DEPARTMENT,
+  ) ?? departmentMetas()[0];
+
+  const [selectedDepartmentId, setSelectedDepartmentId] = createSignal(
+    departmentTabDefault?.id ?? 0,
+  );
+
+  const selectedDepartment = () =>
+    departmentMetas().find((d) => d.id === selectedDepartmentId()) ??
+    departmentTabDefault;
+
+  return (
+    <div class="flex items-center gap-2">
+      <DepartmentFilter
+        options={departmentMetas()}
+        value={selectedDepartmentId()}
+        onChange={(id) => setSelectedDepartmentId(id)}
+        showAll={false}
+      />
+      …existing board content driven by selectedDepartment()…
+    </div>
+  );
+```
+
+Note: `DEFAULT_DEPARTMENT`, `SYSTEM_ADMIN_DEPARTMENT`, `infoDepartment`, and `isManager` must be reachable from `boards.tsx` (they already are in `setting-context.tsx` — import what `boards.tsx` lacks, or hoist the metas/defaults from the settings context as the existing code does). Remove the now-unused Tabs imports if nothing else uses them in this file. Add the import:
+
+```tsx
+import DepartmentFilter from "~/components/datatable/DepartmentFilter";
+```
+
+- [ ] **Step 3: Typecheck**
+
+```bash
+npx tsc --noEmit
+```
+
+Expected: no type errors.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/pages/admin/dispatch/
+git commit -m "feat: dispatch page department tabs to unified dropdown"
+```
+
+---
+
+### Task 5: E2E + full verification
 
 **Files:**
 - Create: `e2e/department-filter.spec.cjs`
@@ -619,6 +735,21 @@ test.describe("manager: department dropdown filter", () => {
 
     await trigger.click();
     await expect(page.getByText("全部部門")).toBeVisible();
+  });
+
+  test("dispatch page: dropdown replaces tabs, no 全部 option, switches board", async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/admin/dispatch`);
+
+    // 下拉取代 tab：預設顯示部門（ssd 自己部門；若被 SYSTEM_ADMIN_DEPARTMENT 排除則為 DEFAULT_DEPARTMENT）
+    const trigger = page.getByRole("button", { name: "部門過濾" });
+    await expect(trigger).toBeVisible();
+    await expect(trigger).toBeEnabled();
+
+    await trigger.click();
+    // dispatch 無「全部部門」選項
+    await expect(page.getByText("全部部門")).toHaveCount(0);
   });
 });
 
