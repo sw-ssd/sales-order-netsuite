@@ -18,7 +18,7 @@
 | 語言 | TypeScript 5.9（ES 模組，`type: "module"`） |
 | 建置工具 | Vite 6 |
 | 路由 | [TanStack Solid Router](https://tanstack.com/router/latest) 1.170（檔案式路由） |
-| 狀態 / 伺服器快取 | [TanStack Solid Query](https://tanstack.com/query/latest) 5.100 |
+| 狀態 / 伺服器快取 | [TanStack Solid Query](https://tanstack.com/query/latest) 5.101 |
 | 表單 | `@modular-forms/solid`、`@tanstack/solid-form` |
 | 驗證 | `valibot` 1.0.0-beta.9 |
 | 樣式 | TailwindCSS 3.4 + `tailwindcss-animate` |

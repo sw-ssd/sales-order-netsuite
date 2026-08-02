@@ -324,8 +324,9 @@ bundle exec fastlane ios beta   # upload_to_testflight
 
 **截圖注入自動化（已實跑）**：`scripts/butterkit/` 內三支腳本以 JSON-RPC stdio 直接驅動 `butterkit-mcp`（不經 Kimi MCP 掛載）：
 ```bash
+# 註：`<repo 根目錄>` 為本機絕對路徑，依機器而異；script 需要絕對 file:// URI，執行前請替換為實際路徑
 # 1. 重新抓取文件 artboard / device modelId 對照（base 與 zh-hant variant 的 modelId 各自不同）
-python3 scripts/butterkit/butterkit_devices.py "file:///Volumes/UTM2/Developer/sales-order-netsuite/appimg/screenshots.butterkit/" scripts/butterkit/butterkit_devices.json
+python3 scripts/butterkit/butterkit_devices.py "file://<repo 根目錄>/appimg/screenshots.butterkit/" scripts/butterkit/butterkit_devices.json
 
 # 2. 注入（--dry-run 先預覽；會把 PNG 複製到 group container 的 MCPAssets 再逐裝置設置）
 # iOS
@@ -336,7 +337,7 @@ python3 scripts/butterkit/butterkit_inject.py integration_test/.maestro/test_out
 python3 scripts/butterkit/butterkit_inject.py integration_test/.maestro/test_output_directory/screenshots/store --platform android
 
 # 3. 匯出驗證（outputDir 必須在 ~/Library/Group Containers/group.app.butterkit/ 內，/tmp 無權限）
-python3 scripts/butterkit/mcp_call.py call design_export_artboards '{"documentId":"file:///Volumes/UTM2/Developer/sales-order-netsuite/appimg/screenshots.butterkit/","outputDir":"/Users/ssd/Library/Group Containers/group.app.butterkit/MCPAssets/export"}'
+python3 scripts/butterkit/mcp_call.py call design_export_artboards '{"documentId":"file://<repo 根目錄>/appimg/screenshots.butterkit/","outputDir":"~/Library/Group Containers/group.app.butterkit/MCPAssets/export"}'
 ```
 - 對應文件：`../appimg/screenshots.butterkit`（10 畫面 × 2 尺寸 × 2 語系 = 40 artboards）；截圖→artboard 對照表寫在 `butterkit_inject.py` 的 `MAPPING`。
 - `登錄頁面` 為雙機構圖：

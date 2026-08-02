@@ -29,7 +29,7 @@
 | 遷移工具 | [pressly/goose/v3](https://github.com/pressly/goose) + Atlas `migrate diff` |
 | Session | [alexedwards/scs/v2](https://github.com/alexedwards/scs)，自訂 Postgres/Ent Store |
 | 權限 | [casbin/casbin/v2](https://github.com/casbin/casbin) + 自訂 Ent Adapter |
-| 驗證 / 密碼 | `golang-jwt/jwt/v5`、JWT Bearer、`alexedwards/argon2id` |
+| 驗證 / 密碼 | `golang-jwt/jwt/v5`（僅遺留的 middleware / `cmd/token` 使用，見 §7.1）、`alexedwards/argon2id` |
 | 驗證器 | `go-playground/validator/v10` |
 | HTTP 輸入綁定 | `ggicci/httpin` |
 | 快取（可選） | Redis / Valkey（`go-redis/v9`） |

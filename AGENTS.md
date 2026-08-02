@@ -48,4 +48,3 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 | `sales-order-app/` | Flutter / Dart 行動 App | `docs/AGENTS/app.md` |
 | `sales-order-backend/` | Go REST API | `docs/AGENTS/backend.md` |
 | `sales-order-frontend/` | SolidJS / TypeScript Web | `docs/AGENTS/frontend.md` |
-
