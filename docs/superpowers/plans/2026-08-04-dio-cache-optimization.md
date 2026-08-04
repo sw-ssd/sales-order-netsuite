@@ -13,8 +13,10 @@
 - Backend：Go 1.25，chi router，測試用標準 `httptest` + `go test ./...`，module `github.com/hexagon-maker/sales-order-backend`
 - App：Flutter 3.35.2（`.fvmrc`），`fvm flutter analyze` 0 errors、`fvm flutter test` 全過
 - **frontend（sales-order-frontend）不得有任何變更**
-- `Cache-Control` 對 `/api` 改為 `private, no-cache`（**絕不 `public`** — 避免已登入用戶資料被共享快取串到其他用戶）
+- **Client 區分（設計修正）**：後端依 `X-App-Client: mobile` header 區分 — App 拿 `private, max-age=300`（零請求命中），瀏覽器（無 header）拿 `private, no-cache`（revalidate，零影響）
+- `Cache-Control` 一律 `private`、**絕不 `public`**（避免已登入用戶資料被共享快取串到其他用戶）
 - ETag 只套用 GET + HTTP 200 + 非空 body；非 GET / 非 200 / 空 body 不設 ETag
+- App 端 dio 送 `X-App-Client: mobile` header（AuthInterceptor）
 - 每個 task 完成後可獨立測試；commit message 用 conventional format
 
 ---
@@ -342,7 +344,7 @@ import (
 	"testing"
 )
 
-func TestPublicCacheMiddleware_APIPathPrivateNoCache(t *testing.T) {
+func TestPublicCacheMiddleware_APIPathBrowserNoCache(t *testing.T) {
 	handler := PublicCacheMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -353,7 +355,23 @@ func TestPublicCacheMiddleware_APIPathPrivateNoCache(t *testing.T) {
 
 	got := rec.Header().Get("Cache-Control")
 	if got != "private, no-cache" {
-		t.Fatalf("Cache-Control = %q, want \"private, no-cache\"", got)
+		t.Fatalf("Cache-Control = %q, want \"private, no-cache\" (browser)", got)
+	}
+}
+
+func TestPublicCacheMiddleware_APIPathMobileMaxAge(t *testing.T) {
+	handler := PublicCacheMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/customers", nil)
+	req.Header.Set("X-App-Client", "mobile")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	got := rec.Header().Get("Cache-Control")
+	if got != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q, want \"private, max-age=300\" (mobile)", got)
 	}
 }
 
@@ -380,7 +398,7 @@ cd sales-order-backend
 go test ./internal/middleware/ -run TestPublicCache -v
 ```
 
-預期：FAIL（目前 `/api` 是 `no-cache, no-store`）。
+預期：FAIL（目前 `/api` 是 `no-cache, no-store`，且無 client 區分）。
 
 - [ ] **Step 3: 修改 publicCache.go**
 
@@ -395,10 +413,18 @@ import (
 
 func PublicCacheMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// API 路由：private, no-cache — 允許 client 存 cache 但每次 revalidate
-		// （配合 ETag 做條件請求）。絕不 public，避免已登入用戶資料被共享。
+		// API 路由：依 client 區分 Cache-Control。
+		// - Flutter App（送 X-App-Client: mobile）→ private, max-age=300，
+		//   dio 可直接命中 cache（零請求），過期後靠 ETag 304 更新。
+		// - 瀏覽器（frontend，無該 header）→ private, no-cache，每次 revalidate，
+		//   與現況等價、零影響。
+		// 一律 private、絕不 public（避免已登入用戶資料被共享快取串到其他用戶）。
 		if strings.HasPrefix(r.URL.Path, "/api") {
-			w.Header().Set("Cache-Control", "private, no-cache")
+			if r.Header.Get("X-App-Client") == "mobile" {
+				w.Header().Set("Cache-Control", "private, max-age=300")
+			} else {
+				w.Header().Set("Cache-Control", "private, no-cache")
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -440,7 +466,7 @@ go test ./...
 
 ```bash
 git add internal/middleware/publicCache.go internal/middleware/public_cache_test.go internal/server/server.go
-git commit -m "feat: private no-cache for API routes and mount ETag middleware"
+git commit -m "feat: client-aware Cache-Control (mobile max-age, browser no-cache) and mount ETag middleware"
 ```
 
 ---
@@ -453,14 +479,100 @@ git commit -m "feat: private no-cache for API routes and mount ETag middleware"
 - Modify: `lib/layer_data/repositories/cache_storage.dart`
 - Modify: `lib/layer_data/repositories/abstract/abstract_cache_storage.dart`
 - Modify: `lib/layer_business/network/api/cache_options_mixin.dart`
+- Modify: `lib/layer_business/network/auth_interceptor.dart`（送 `X-App-Client: mobile` header）
 - Modify: `test/unit/services/auth_service_test.dart`（stub 移除 mdCache）
 - Modify: `test/unit/services/auth_interceptor_401_test.dart`（stub 移除 mdCache）
 - Modify: `test/auth/auth_interceptor_test.dart`（stub 移除 mdCache）
 - Create: `test/unit/repositories/cache_storage_test.dart`（配置測試）
+- Create: `test/integration/dio_cache_etag_test.dart`（dio ETag 整合測試）
+- Create: `test/unit/network/auth_interceptor_client_header_test.dart`（X-App-Client header 測試）
 
 **Interfaces:**
 - Consumes: 無（純配置調整）
 - Produces: `CacheOptions` 的 `hitCacheOnErrorCodes = [404, 500]`、`hitCacheOnNetworkFailure = true`；移除 `mdCache`/`mediumCacheOptions`
+
+- [ ] **Step 0: 加入 X-App-Client header**
+
+`lib/layer_business/network/auth_interceptor.dart` 的 `onRequest` 中，與現有 `Accept` header 設定同位置加入：
+
+```dart
+    options.headers['Accept'] = ['application/json'];
+    options.headers['Access-Control-Allow-Origin'] = 'true';
+    // 後端依此區分 Cache-Control：mobile → max-age（零請求命中），
+    // 瀏覽器（無此 header）→ no-cache（每次 revalidate，不受影響）。
+    options.headers['X-App-Client'] = 'mobile';
+```
+
+- [ ] **Step 0b: X-App-Client header 測試**
+
+`test/unit/network/auth_interceptor_client_header_test.dart`：
+
+```dart
+// test/unit/network/auth_interceptor_client_header_test.dart
+import 'dart:io';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:hexagon_food_app/layer_business/network/auth_interceptor.dart';
+import 'package:hexagon_food_app/layer_business/services/auth/auth_session_manager.dart';
+import 'package:hexagon_food_app/layer_data/repositories/session_info_storage.dart';
+import 'package:cookie_jar/cookie_jar.dart';
+import 'package:cached_memory_image/cached_image_base64_manager.dart';
+import 'package:dio/dio.dart';
+import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import '../../auth/fake_path_provider.dart';
+
+class StubCacheStorage extends CacheStorage {
+  @override Future<void> clearCache() async {}
+  @override CacheOptions get defaultOptions => CacheOptions(store: MemCacheStore());
+  @override CacheOptions get smallCacheOptions => CacheOptions(store: MemCacheStore());
+  @override CacheOptions get largeCacheOptions => CacheOptions(store: MemCacheStore());
+  @override CacheOptions get noCacheOptions => CacheOptions(store: MemCacheStore());
+  @override CacheOptions get refreshOptions => CacheOptions(store: MemCacheStore());
+  @override CacheOptions get forceCacheOptions => CacheOptions(store: MemCacheStore());
+  @override CacheOptions get refreshForceCacheOptions => CacheOptions(store: MemCacheStore());
+  @override Options get smCache => Options();
+  @override Options get lgCache => Options();
+  @override Options get noCache => Options();
+  @override Options get refresh => Options();
+  @override Options get forceRefetch => Options();
+  @override Options get refreshForceCache => Options();
+  @override DioCacheInterceptor get interceptor => DioCacheInterceptor(options: defaultOptions);
+  @override Future<void> clean({CachePriority priorityOrBelow = CachePriority.high, bool staleOnly = false}) async {}
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  registerFakePathProvider();
+  sqfliteFfiInit();
+  databaseFactory = databaseFactoryFfi;
+
+  late AuthSessionManager sessionManager;
+  late AuthInterceptor interceptor;
+  late Directory tmpDir;
+
+  setUp(() async {
+    tmpDir = Directory.systemTemp.createTempSync('client_header_test_');
+    final sessionStorage = await InSessionInfoStorage.create(tmpDir.path);
+    sessionManager = AuthSessionManager(
+      sessionInfo: sessionStorage,
+      cookieJar: PersistCookieJar(ignoreExpires: true),
+      cacheStorage: StubCacheStorage(),
+      imageCache: CachedImageBase64Manager.instance(),
+    );
+    interceptor = AuthInterceptor(sessionManager: sessionManager);
+  });
+
+  tearDown(() {
+    tmpDir.deleteSync(recursive: true);
+  });
+
+  test('onRequest sets X-App-Client: mobile header', () async {
+    final options = RequestOptions(path: '/api/v1/test');
+    await interceptor.onRequest(options, RequestInterceptorHandler());
+    expect(options.headers['X-App-Client'], 'mobile');
+  });
+}
+```
 
 - [ ] **Step 1: 確認 mdCache 無業務使用**
 
@@ -609,8 +721,8 @@ fvm flutter test
 - [ ] **Step 7: Commit**
 
 ```bash
-git add lib/layer_data/repositories/ lib/layer_business/network/api/cache_options_mixin.dart test/
-git commit -m "fix: correct cache error fallback codes, enable network-failure fallback, drop unused mdCache"
+git add lib/layer_data/repositories/ lib/layer_business/network/ test/
+git commit -m "fix: correct cache error fallback codes, enable network-failure fallback, send X-App-Client header, drop unused mdCache"
 ```
 ---
 
@@ -619,27 +731,43 @@ git commit -m "fix: correct cache error fallback codes, enable network-failure f
 ### Task 4: 端對端驗證
 
 **Files:**
-- 無（驗證任務）
+- Create: `test/integration/dio_cache_etag_test.dart`（dio 整合測試 — 已在 Task 3 建立）
+- 無其他（驗證任務）
 
 **Interfaces:**
 - Consumes: Tasks 1-3
 - Produces: 驗證紀錄（寫入 task report）
 
-- [ ] **Step 1: 起後端 + 驗證 ETag/304**
+- [ ] **Step 1: 起後端 + 驗證 ETag/304 與 client 區分**
 
 ```bash
 cd sales-order-backend
 task infra:start   # docker-compose DB 等（若需要）
 task dev           # air hot-reload，監聽 0.0.0.0:3080
 
+# 驗證 client 區分：無 header → private, no-cache；X-App-Client: mobile → private, max-age=300
+curl -s -D - -o /dev/null http://localhost:3080/api/v1/restricted/csrf
+curl -s -D - -o /dev/null -H "X-App-Client: mobile" http://localhost:3080/api/v1/restricted/csrf
+
 # 驗證 ETag：GET 兩次，第一次拿 ETag，第二次帶 If-None-Match 應得 304
-curl -s -D - -o /dev/null http://localhost:3080/api/v1/restricted/csrf -X GET
+curl -s -D - -o /dev/null http://localhost:3080/api/v1/restricted/csrf
 curl -s -D - -H "If-None-Match: <上一步的 ETag>" http://localhost:3080/api/v1/restricted/csrf
 ```
 
-預期：第一次 200 + `ETag` header + `Cache-Control: private, no-cache`；第二次 304 無 body。
+預期：無 header → `Cache-Control: private, no-cache`；mobile → `private, max-age=300`；第一次 200 + `ETag`；第二次 304 無 body。
 
-- [ ] **Step 2: App 端驗證 cache 行為**
+- [ ] **Step 2: dio 整合測試（不需後端，MemCacheStore）**
+
+```bash
+cd sales-order-app
+fvm flutter test test/integration/dio_cache_etag_test.dart
+```
+
+預期：2 tests 全過 —
+1. `max-age=300` response 寫入 cache，max-age 內第二次請求零網路（`extraFromNetworkKey == false`）
+2. `no-cache` response（瀏覽器情境）每次 revalidate（frontend 零影響機制）
+
+- [ ] **Step 3: App 端驗證 cache 行為**
 
 ```bash
 cd sales-order-app
@@ -647,23 +775,23 @@ fvm flutter run --flavor dev --target lib/main_dev.dart
 ```
 
 手動驗證（用 Talker logger 或網路監看）：
-1. 登入後進客戶列表 → 第一次載入打 API（200 + ETag）
-2. 離開再進（5min 內）→ 零網路請求（cache 命中）
+1. 登入後進客戶列表 → 第一次載入打 API（200 + ETag + max-age=300）
+2. 離開再進（5min 內）→ 零網路請求（cache 直接命中）
 3. 下拉刷新 → 一次網路請求（refreshForceCache）
 4. 關掉後端 → 再進列表 → 顯示 cache 舊資料（hitCacheOnNetworkFailure）
 
-- [ ] **Step 3: frontend 驗證**
+- [ ] **Step 4: frontend 驗證**
 
 ```bash
 cd sales-order-frontend
 pnpm dev
 ```
 
-手動開瀏覽器登入，確認各頁面資料正常、無錯誤、無行為變化。
+手動開瀏覽器登入，確認各頁面資料正常、無錯誤、無行為變化（瀏覽器請求無 `X-App-Client` header → 拿 `no-cache`，行為與現況等價）。
 
-- [ ] **Step 4: 紀錄驗證結果**
+- [ ] **Step 5: 紀錄驗證結果**
 
-將各步驟的實際輸出寫入 task report（無 commit — 驗證任務）。
+將各步驟的實際輸出寫入 task report（無 commit — 驗證任務；若 dio 整合測試在 Task 3 未建立，則在此建立並 commit）。
 
 ---
 
