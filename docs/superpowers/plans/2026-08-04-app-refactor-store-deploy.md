@@ -531,22 +531,25 @@ import 'package:hexagon_food_app/layer_business/network/abstract/auth_api_type.d
 import 'package:dio/dio.dart';
 
 class FakeAuthApi extends AuthApiType {
-  dynamic _nextResponse;
+  final List<dynamic> _responses = [];
   String? _simulateError;
 
-  void setResponse(dynamic response) => _nextResponse = response;
+  /// 依序放入 API 呼叫的回傳資料（如 [getCsrfToken] → [getMe] → [signin]）。
+  void queueResponses(List<dynamic> responses) => _responses.addAll(responses);
   void setError(String error) => _simulateError = error;
+
+  dynamic _next() => _responses.isNotEmpty ? _responses.removeAt(0) : null;
 
   @override
   Future<Response> signin(Map<String, dynamic> formData, Options options) async {
     if (_simulateError != null) throw DioException(requestOptions: RequestOptions(path: ''), message: _simulateError);
-    return Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
+    return Response(requestOptions: RequestOptions(path: ''), statusCode: 200, data: _next());
   }
 
   @override
   Future<Response> customerSignin(Map<String, dynamic> formData, Options options) async {
     if (_simulateError != null) throw DioException(requestOptions: RequestOptions(path: ''), message: _simulateError);
-    return Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
+    return Response(requestOptions: RequestOptions(path: ''), statusCode: 200, data: _next());
   }
 
   @override
@@ -558,14 +561,14 @@ class FakeAuthApi extends AuthApiType {
   @override
   Future<Response> getMe() async {
     if (_simulateError != null) throw DioException(requestOptions: RequestOptions(path: ''), message: _simulateError);
-    return Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
+    return Response(requestOptions: RequestOptions(path: ''), statusCode: 200, data: _next());
   }
   @override
-  Future<Response> getCsrfToken() async => Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
+  Future<Response> getCsrfToken() async => Response(requestOptions: RequestOptions(path: ''), statusCode: 200, data: _next());
   @override
-  Future<Response> validEmail(String email) async => Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
+  Future<Response> validEmail(String email) async => Response(requestOptions: RequestOptions(path: ''), data: _next());
   @override
-  Future<Response> validEntityId(String entity) async => Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
+  Future<Response> validEntityId(String entity) async => Response(requestOptions: RequestOptions(path: ''), data: _next());
   @override
   Future<Response> newsetSalesrepPassword(Map<String, dynamic> formData, Options options) async => Response(requestOptions: RequestOptions(path: ''), statusCode: 200);
   @override
@@ -633,7 +636,7 @@ git commit -m "test: add test helpers (fake API, locator, pumpApp)"
 
 ## 階段 2：狀態管理統一
 
-### Task 7: AuthProvider → AuthService 重構
+### Task 7: AuthProvider → AuthService 重構（完整移植）
 
 **Files:**
 - Create: `lib/layer_business/services/auth/auth_service.dart`
@@ -642,228 +645,357 @@ git commit -m "test: add test helpers (fake API, locator, pumpApp)"
 - Modify: `lib/layer_presentation/stories/auth/salesrep_signin_screen.dart`
 - Modify: `lib/layer_presentation/stories/auth/customer_signin_screen.dart`
 - Modify: `lib/layer_presentation/stories/auth/customer_qrcode_signin_screen.dart`
-- Modify: `lib/layer_business/router/routes.dart`
 - Delete: `lib/layer_business/services/auth/provider.dart`
 
 **Interfaces:**
-- Consumes: `AuthApiType`（從 GetIt 注入）、`AuthSessionManager`（從 GetIt 注入）
-- Produces: `AuthService` class with `Signal<AuthStatus> status`、`Signal<AuthSessionInfo?> sessionInfo`、`signIn()`、`signOut()`、`dispose()`
+- Consumes: `AuthApi`（從 GetIt 注入，`locator<AuthApi>()`）、`AuthSessionManager`（從 GetIt 注入）
+- Produces: `AuthService` — **完整移植**舊 `AuthProvider` 所有公開方法（`signinHandler`、`customerSigninHandler`、`signoutHandler`、`forceSignoutHandler`、`meHandler`、`clearLocalSession`、`restorePreviousPageIfAny`、`resetNullPasswordHandler`、`validEmailHandler`、`validExternalIdHandler`、`newsetSalesrepPasswordHandler`、`newsetCustomerPasswordHandler`）+ getters（`isLogin`、`userType`、`isCustomer`、`isSalesRep`、`createdById`）+ `dispose()`；狀態改以 solidart `Signal` 暴露
 
-- [ ] **Step 1: 建立 AuthService**
+> **重要（controller 修正）**：這是**行為不變的移植**，不是重寫。
+> - 所有對外方法**簽名完全不變**（畫面與 `routes.dart` 依賴它們）。不要發明新方法名（如 `salesrepSignIn`），不要刪除方法。
+> - **不要發明 `AuthStatus` enum** — codebase 沒有這種東西。登入狀態由 `AuthSessionManager.isLoggedIn` 決定。
+> - `Signal<T>` 本身實現 `ValueNotifier<T>`（`addListener`/`removeListener`），**沒有 `subscribe` 方法**。要監聽 signal 請用 `addListener` 或 `SignalBuilder`。
+> - 舊 `AuthProvider` 的方法會 throw `Exception(errorException.message)` 給畫面 try/catch — 保留此行為，畫面錯誤顯示邏輯不需改。
+
+- [ ] **Step 1: 建立 AuthService（完整移植，方法體與 AuthProvider 相同）**
 
 ```dart
 // lib/layer_business/services/auth/auth_service.dart
+import 'dart:async';
+
+import 'package:awesome_flutter_extensions/awesome_flutter_extensions.dart';
+import 'package:dio/dio.dart';
 import 'package:disco/disco.dart';
-import 'package:flutter/widgets.dart';
 import 'package:flutter_solidart/flutter_solidart.dart';
 import 'package:hexagon_food_app/layer_business/network/abstract/auth_api_type.dart';
+import 'package:hexagon_food_app/layer_business/network/api/auth_api.dart';
 import 'package:hexagon_food_app/layer_business/network/error_exception.dart';
+import 'package:hexagon_food_app/layer_business/router/paths.dart';
+import 'package:hexagon_food_app/layer_business/router/routes.dart';
 import 'package:hexagon_food_app/layer_business/services/auth/auth_session_manager.dart';
 import 'package:hexagon_food_app/layer_business/utils/locator.dart';
-import 'package:hexagon_food_app/layer_data/models/auther/customer/customer_session_info.dart';
-import 'package:hexagon_food_app/layer_data/models/auther/salesrep/salesrep_session_info.dart';
 import 'package:hexagon_food_app/layer_data/models/auther/auther_session_info.dart';
-import 'package:hexagon_food_app/layer_data/models/base/auther_status.dart';
-import 'package:hexagon_food_app/layer_data/repositories/session_info_storage.dart';
-import 'package:dio/dio.dart';
+import 'package:hexagon_food_app/layer_data/models/auther/auther_status_check.dart';
 
 final accountAuthProvider = Provider(
-  (context) => AuthService(api: locator<AuthApiType>(), sessionManager: locator<AuthSessionManager>()),
+  (context) => AuthService(api: locator<AuthApi>(), sessionManager: locator<AuthSessionManager>()),
   dispose: (service) => service.dispose(),
 );
 
+/// 認證服務 — 取代 [ChangeNotifier] 型 [AuthProvider]。
+///
+/// 對外方法簽名與舊 [AuthProvider] 完全一致；畫面只需改 import 與
+/// 型別參數（`AuthProvider` → `AuthService`），呼叫不變。
+/// 狀態以 solidart [Signal] 暴露：[Signal] 本身是 [ValueNotifier]，
+/// auto_route 的 `reevaluateListenable` 可直接吃 signal。
 class AuthService {
-  AuthService({required this.api, required this.sessionManager});
-
-  final AuthApiType api;
-  final AuthSessionManager sessionManager;
-
-  final _status = Signal<AuthStatus>(AuthStatus.unknown);
-  final _sessionInfo = Signal<AuthSessionInfo?>(null);
-  final _authError = Signal<String?>(null);
-
-  AuthStatus get status => _status.value;
-  AutherSessionInfo? get sessionInfoValue => _sessionInfo.value;
-  String? get authError => _authError.value;
-  bool get isLoggedIn => _status.value == AuthStatus.authenticated;
-
-  Signal<AuthStatus> get statusSignal => _status;
-  Signal<AuthSessionInfo?> get sessionInfoSignal => _sessionInfo;
-  Signal<String?> get authErrorSignal => _authError;
-
-  /// 訂閱 session stream，同步狀態變更。
-  void _listenSession() {
-    sessionManager.sessionStream.listen((info) {
+  AuthService({required AuthApiType api, required AuthSessionManager sessionManager})
+      : _api = api,
+        _sessionManager = sessionManager {
+    _sessionSubscription = _sessionManager.sessionStream.listen((info) {
       _sessionInfo.value = info;
-      if (info?.isAuth ?? false) {
-        _status.value = AuthStatus.authenticated;
-      }
     });
   }
 
-  /// 業務登入。
-  Future<bool> salesrepSignIn(String email, String password) async {
-    _status.value = AuthStatus.loading;
-    _authError.value = null;
+  final AuthApiType _api;
+  final AuthSessionManager _sessionManager;
+  late final StreamSubscription<AutherSessionInfo?> _sessionSubscription;
 
+  /// session 狀態 signal（ValueNotifier，可當 auto_route reevaluateListenable）。
+  final _sessionInfo = Signal<AutherSessionInfo?>(null);
+  Signal<AutherSessionInfo?> get sessionInfoSignal => _sessionInfo;
+
+  bool get isLogin => _sessionManager.isLoggedIn;
+  String get userType => _sessionManager.userType ?? "";
+  bool get isCustomer => userType == "customer";
+  bool get isSalesRep => userType == "salesrep";
+  int? get createdById =>
+      isSalesRep ? _sessionManager.inSessionInfo.salesrepInfo?.id : _sessionManager.inSessionInfo.customerInfo?.id;
+
+  FutureOr<Response> meHandler(bool isAuth) async {
     try {
-      final response = await api.getCsrfToken();
-      // 從 response 取得 csrf token 的邏輯保持與原 AuthProvider 相同
-      sessionManager.csrfToken = response.data?['csrf_token'] as String?;
-
-      final signinResponse = await api.signin({
-        'email': email,
-        'password': password,
-      }, Options());
-
-      if (signinResponse.statusCode == 200) {
-        _listenSession();
-        return true;
-      } else {
-        _authError.value = '登入失敗，請檢查帳號密碼';
-        _status.value = AuthStatus.unauthenticated;
-        return false;
+      final meResponse = await _api.getMe();
+      if (meResponse.statusCode != 200) {
+        ErrorException errorException = ErrorException.fromTypeError("無法取得使用者資料: ${meResponse.statusMessage}");
+        throw Exception(errorException.message);
       }
-    } on DioException catch (e) {
-      _status.value = AuthStatus.unauthenticated;
-      final error = ErrorException.fromDioError(e);
-      _authError.value = error.message;
-      return false;
-    } catch (e) {
-      _status.value = AuthStatus.unauthenticated;
-      _authError.value = '發生錯誤，請稍後再試';
-      return false;
+      final si = AutherSessionInfo.fromJson(meResponse.data as Map<String, dynamic>);
+
+      if (si.userType == "salesrep") {
+        _sessionManager.inSessionInfo.write(si.copyWith(salesrep: si.salesrep, isAuth: isAuth, userType: si.userType));
+      } else if (si.userType == "customer") {
+        _sessionManager.inSessionInfo.write(si.copyWith(customer: si.customer, isAuth: isAuth, userType: si.userType));
+      } else {
+        ErrorException errorException = ErrorException.fromTypeError("無效的使用者類型: ${si.userType}");
+        throw Exception(errorException.message);
+      }
+      return meResponse;
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
     }
   }
 
-  /// 客戶登入。
-  Future<bool> customerSignIn(String entityId, String password) async {
-    _status.value = AuthStatus.loading;
-    _authError.value = null;
-
+  FutureOr<Response> signinHandler(Map<String, dynamic> formData) async {
     try {
-      final response = await api.getCsrfToken();
-      sessionManager.csrfToken = response.data?['csrf_token'] as String?;
-
-      final signinResponse = await api.customerSignin({
-        'entity_id': entityId,
-        'password': password,
-      }, Options());
-
-      if (signinResponse.statusCode == 200) {
-        _listenSession();
-        return true;
-      } else {
-        _authError.value = '登入失敗，請檢查帳號密碼';
-        _status.value = AuthStatus.unauthenticated;
-        return false;
+      final response = await _api.signin(formData, Options(extra: {"signinType": "salesrep"}));
+      if (response.statusCode == 200) {
+        await _completeSignIn();
       }
-    } on DioException catch (e) {
-      _status.value = AuthStatus.unauthenticated;
-      final error = ErrorException.fromDioError(e);
-      _authError.value = error.message;
-      return false;
+      return response;
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
     } catch (e) {
-      _status.value = AuthStatus.unauthenticated;
-      _authError.value = '發生錯誤，請稍後再試';
-      return false;
+      throw Exception('登入失敗: $e');
     }
   }
 
-  /// 登出。
-  Future<void> signOut() async {
+  FutureOr<Response> customerSigninHandler(Map<String, dynamic> formData) async {
     try {
-      await api.signout(sessionManager.userType ?? '');
+      final response = await _api.customerSignin(formData, Options(extra: {"signinType": "customer"}));
+      if (response.statusCode == 200) {
+        await _completeSignIn();
+      }
+      return response;
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
+    } catch (e) {
+      throw Exception('登入失敗: $e');
+    }
+  }
+
+  /// 登入成功後統一取得使用者資訊；若失敗則清除已寫入的 cookies，避免狀態不一致。
+  ///
+  /// 失敗時只清 cookies 而不清 session；同時避免呼叫 [clearSession] 同步觸發
+  /// reevaluateGuards，導致與進行中的 Dio / navigation 流程競爭。
+  Future<void> _completeSignIn() async {
+    try {
+      await meHandler(true);
+      // 登入後取得 CSRF token，供狀態變更請求使用（session 內可重複使用）
+      await _fetchCsrfToken();
+      // 不需手動通知；meHandler 寫入 session 時會透過 _sessionSubscription
+      // 自動更新 signal，避免與進行中的導航競爭。
     } catch (_) {
-      // 忽略登出 API 錯誤，本機仍清除
+      await _sessionManager.clearAuthCookies();
+      rethrow;
     }
-    sessionManager.pendingRestoreRoute = null;
-    await sessionManager.clearSession();
-    _status.value = AuthStatus.unauthenticated;
-    _sessionInfo.value = null;
-    _authError.value = null;
+  }
+
+  Future<void> _fetchCsrfToken() async {
+    try {
+      final resp = await _api.getCsrfToken();
+      if (resp.statusCode == 200 && resp.data is Map<String, dynamic>) {
+        final data = resp.data as Map<String, dynamic>;
+        _sessionManager.csrfToken = data['csrf_token'] as String?;
+      }
+    } catch (_) {
+      // CSRF 取得失敗不阻擋登入；若後續狀態變更請求因此 403，使用者重新登入即可
+    }
+  }
+
+  FutureOr<Response> signoutHandler() async {
+    try {
+      final response = await _api.signout(userType);
+      if (response.statusCode == 200) {
+        await clearLocalSession();
+      }
+      return response;
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
+    }
+  }
+
+  FutureOr<Response> forceSignoutHandler() async {
+    late final int userId;
+    if (isSalesRep) {
+      userId = _sessionManager.inSessionInfo.salesrepInfo?.id ?? 0;
+    } else {
+      userId = _sessionManager.inSessionInfo.customerInfo?.id ?? 0;
+    }
+
+    try {
+      final response = await _api.forceSignout(userType, userId);
+      if (response.statusCode == 200) {
+        await clearLocalSession();
+      }
+      return response;
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
+    }
+  }
+
+  /// 清除本機 session/cookies/快取，不會呼叫遠端 signout API。
+  Future<void> clearLocalSession() async {
+    // 明確登出不還原頁面：清除 401 可能殘留的待還原路由。
+    _sessionManager.pendingRestoreRoute = null;
+    await _sessionManager.clearSession();
+  }
+
+  /// 重新登入後還原 401 前所在頁面（由各登入畫面導回首頁後呼叫）。
+  Future<void> restorePreviousPageIfAny() async {
+    final restore = _sessionManager.pendingRestoreRoute;
+    _sessionManager.pendingRestoreRoute = null;
+    if (restore == null || restore.isEmpty) {
+      return;
+    }
+    if (!_isRestorableRoute(restore)) {
+      return;
+    }
+    await locator<AppRouter>().pushPath(
+      restore,
+      onFailure: (failure) => '還原頁面失敗: $restore ($failure)'.log(),
+    );
+  }
+
+  bool _isRestorableRoute(String path) {
+    if (path.isEmpty || path == '/') {
+      return false;
+    }
+    if (path.startsWith('/${RoutePath.authLayout.toValue()}')) {
+      return false;
+    }
+    if (path.startsWith('/${RoutePath.salesorderItemLayout.toValue()}')) {
+      return false;
+    }
+    if (path == locator<AppRouter>().currentPath) {
+      return false;
+    }
+    return true;
+  }
+
+  FutureOr<Response> resetNullPasswordHandler(int userId) async {
+    try {
+      final response = await _api.resetNullPassword("customer", userId);
+      return response;
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
+    }
+  }
+
+  Future<AutherStatusCheck> validEmailHandler(String email) async {
+    try {
+      final resp = await _api.validEmail(email.trim());
+      return AutherStatusCheck.fromJson(resp.data as Map<String, dynamic>);
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
+    }
+  }
+
+  FutureOr<AutherStatusCheck> validExternalIdHandler(String externalId) async {
+    try {
+      final resp = await _api.validEntityId(externalId.trim());
+      if (resp.statusCode != 200) {
+        if (resp.statusCode == 404) {
+          ErrorException errorException = ErrorException.fromTypeError("客戶帳號不存在");
+          throw Exception(errorException.message);
+        }
+        ErrorException errorException = ErrorException.fromTypeError("無法驗證客戶帳號: ${resp.statusMessage}");
+        throw Exception(errorException.message);
+      }
+      return AutherStatusCheck.fromJson(resp.data as Map<String, dynamic>);
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
+    }
+  }
+
+  FutureOr<Response> newsetSalesrepPasswordHandler(Map<String, dynamic> formData) async {
+    try {
+      final resp = await _api.newsetSalesrepPassword(formData, Options(extra: {"passwordType": "salesrep"}));
+      return resp;
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
+    }
+  }
+
+  FutureOr<Response> newsetCustomerPasswordHandler(Map<String, dynamic> formData) async {
+    try {
+      final resp = await _api.newsetCustomerPassword(formData, Options(extra: {"passwordType": "customer"}));
+      return resp;
+    } on DioException catch (dioError) {
+      ErrorException errorException = ErrorException.fromDioError(dioError);
+      throw Exception(errorException.message);
+    }
   }
 
   void dispose() {
-    _status.dispose();
+    _sessionSubscription.cancel();
     _sessionInfo.dispose();
-    _authError.dispose();
   }
 }
 ```
 
-- [ ] **Step 2: 更新 app.dart — 移除 accountAuthProvider 的 ChangeNotifier 依賴**
+> 移植後務必對照舊 `provider.dart` 全文（`lib/layer_business/services/auth/provider.dart`）逐一確認：方法清單、throw 行為、註解意圖（同步/競爭條件說明）都要保留。舊檔在 Task 7 最後才刪除。
 
-`app.dart` 中的 `reevaluateListenable: accountAuthProvider.of(context)` 需要改用 solidart signal。檢查 `auto_route` 是否支援 `Listenable`（solidart signal 不直接是 `Listenable`）。
+- [ ] **Step 2: 更新 app.dart — reevaluateListenable 改用 signal**
 
-替代方案：建立一個簡單的 `ChangeNotifier` wrapper 橋接 solidart signal 給 `auto_route`：
-
-```dart
-// 在 auth_service.dart 中增加
-import 'package:flutter/foundation.dart';
-
-/// 橋接 solidart signal 給需要 Listenable 的地方（如 auto_route reevaluateListenable）。
-class _AuthListenable extends ChangeNotifier {
-  _AuthListenable(this._service) {
-    _service._status.subscribe((_) => notifyListeners());
-  }
-  final AuthService _service;
-}
-
-extension AuthServiceListenable on AuthService {
-  Listenable get asListenable => _AuthListenable(this);
-}
-```
+`Signal` 是 `ValueNotifier`，直接當 `reevaluateListenable`：
 
 ```dart
-// app.dart 中修改
-reevaluateListenable: accountAuthProvider.of(context).asListenable,
+// app.dart — 原：reevaluateListenable: accountAuthProvider.of(context),
+// 改為：
+reevaluateListenable: accountAuthProvider.of(context).sessionInfoSignal,
 ```
 
-- [ ] **Step 3: 更新 session_expiry_overlay.dart — 使用 AuthService signal**
+- [ ] **Step 3: 更新 session_expiry_overlay.dart — 改用 AuthService**
 
-將 `AuthProvider? _authProvider` 改為 `AuthService? _authService`，使用 `_authService!.statusSignal.subscribe(...)` 取代 `addListener`：
+讀取 `session_expiry_overlay.dart` 原始碼，將 `AuthProvider? _authProvider` 換成 `AuthService? _authService`（型別來自 `accountAuthProvider.of(context)`）；原 `addListener(_onAuthChanged)` 改為 `_authService!.sessionInfoSignal.addListener(_onAuthChanged)`，`dispose` 時 `removeListener`。其餘邏輯不變。
 
-```dart
-// session_expiry_overlay.dart 修改要點：
-// - 型別從 AuthProvider 改為 AuthService
-// - initState 中：_authService = context.disco.get(accountAuthProvider);
-// - _onAuthChanged 改為訂閱 _authService.statusSignal
-```
+- [ ] **Step 4: 更新登入畫面 — 只改型別**
 
-- [ ] **Step 4: 更新登入畫面 — 改用 AuthService**
-
-`salesrep_signin_screen.dart`、`customer_signin_screen.dart`、`customer_qrcode_signin_screen.dart` 中：
-
-```dart
-// 舊：final authProvider = context.watch<AuthProvider>();
-// 新：
-final authService = accountAuthProvider.of(context);
-// 登入呼叫改為 authService.salesrepSignIn(email, password)
-// 錯誤訊息改為讀取 authService.authErrorSignal
-```
+`salesrep_signin_screen.dart`、`customer_signin_screen.dart`、`customer_qrcode_signin_screen.dart`：
+- import 改為 `package:hexagon_food_app/layer_business/services/auth/auth_service.dart`
+- 型別標註 `AuthProvider ua` → `AuthService ua`（含 helper 方法參數型別）
+- `accountAuthProvider.of(context)` 用法不變；`ua.signinHandler(...)`、`ua.restorePreviousPageIfAny()`、`ua.newsetSalesrepPasswordHandler(...)` 等方法呼叫**一字不改**
 
 - [ ] **Step 5: 更新路由 AuthGuard**
 
-`routes.dart` 中的 `AuthGuard` 檢查目前使用 `locator<AuthSessionManager>().isLoggedIn` — 保持不變（不依賴 AuthProvider）。
+`routes.dart` 的 `AuthGuard` 檢查使用 `locator<AuthSessionManager>().isLoggedIn` — 保持不變（不依賴 AuthProvider）。若原始碼有其他 `AuthProvider` 引用（例如 `profile_screen.dart` 等），逐一改為 `AuthService`（import + 型別）。
 
-- [ ] **Step 6: 執行 flutter analyze**
+- [ ] **Step 6: 全專案掃描剩餘 AuthProvider 引用**
+
+```bash
+cd sales-order-app
+grep -rn "AuthProvider" lib/ --include="*.dart" | grep -v "provider.dart:"
+```
+
+逐一處理：`accountAuthProvider.of(context)` 不變；直接參考 `AuthProvider` 型別處改 `AuthService`。
+
+- [ ] **Step 7: 執行 flutter analyze**
 
 ```bash
 cd sales-order-app
 fvm flutter analyze
 ```
 
-預期：0 errors，可能有 import 相關 warning（修正之）。
+預期：0 errors，0 warnings。
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: 執行現有測試確認無回歸**
 
 ```bash
-git add sales-order-app/lib/layer_business/services/auth/auth_service.dart \
-        sales-order-app/lib/layer_presentation/app.dart \
-        sales-order-app/lib/layer_presentation/general/widgets/session_expiry_overlay.dart \
-        sales-order-app/lib/layer_presentation/stories/auth/
-git rm sales-order-app/lib/layer_business/services/auth/provider.dart
+cd sales-order-app
+fvm flutter test
+```
+
+預期：現有 auth 測試（`test/auth/`）全數通過。
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add lib/layer_business/services/auth/auth_service.dart \
+        lib/layer_presentation/app.dart \
+        lib/layer_presentation/general/widgets/session_expiry_overlay.dart \
+        lib/layer_presentation/stories/auth/ \
+        lib/layer_presentation/stories/admin/ \
+        lib/layer_business/router/
+git rm lib/layer_business/services/auth/provider.dart
 git commit -m "refactor: AuthProvider (ChangeNotifier) → AuthService (solidart Signal)"
 ```
 
@@ -961,7 +1093,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hexagon_food_app/layer_business/services/auth/auth_service.dart';
 import 'package:hexagon_food_app/layer_business/services/auth/auth_session_manager.dart';
-import 'package:hexagon_food_app/layer_data/models/base/auther_status.dart';
 import 'package:hexagon_food_app/layer_data/repositories/session_info_storage.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:cached_memory_image/cached_image_base64_manager.dart';
@@ -1020,61 +1151,72 @@ void main() {
     tmpDir.deleteSync(recursive: true);
   });
 
-  group('salesrepSignIn', () {
-    test('successful login sets status to authenticated', () async {
-      fakeApi.setResponse({
-        'csrf_token': 'test-csrf',
-        'status': 'success',
-        'data': {
-          'user': {'id': 1, 'name': 'Test User'}
-        }
-      });
+  group('signinHandler', () {
+    test('successful login updates session signal', () async {
+      // 依序：getCsrfToken → signin → getMe
+      fakeApi.queueResponses([
+        {'csrf_token': 'test-csrf'},
+        {'status': 'success'},
+        {
+          'id': 1,
+          'name': '測試業務',
+          'email': 'test@example.com',
+          'utype': 'salesrep',
+          'is_auth': true,
+          'session_expires_at': '2026-12-31T23:59:59Z',
+        },
+      ]);
 
-      final result = await authService.salesrepSignIn('test@example.com', 'password');
-      expect(result, isTrue);
-      expect(authService.status, equals(AuthStatus.authenticated));
+      await authService.signinHandler({'email': 'test@example.com', 'password': 'password'});
+      expect(authService.isLogin, isTrue);
+      expect(authService.sessionInfoSignal.value?.isAuth, isTrue);
     });
 
-    test('wrong credentials sets error message', () async {
-      fakeApi.setResponse({'status': 'error', 'message': 'Invalid credentials'});
+    test('wrong credentials throws with message', () async {
+      fakeApi.setError('Invalid credentials');
 
-      final result = await authService.salesrepSignIn('bad@example.com', 'wrong');
-      expect(result, isFalse);
-      expect(authService.status, equals(AuthStatus.unauthenticated));
-      expect(authService.authError, isNotNull);
+      expect(
+        () => authService.signinHandler({'email': 'bad@example.com', 'password': 'wrong'}),
+        throwsException,
+      );
     });
 
-    test('network error sets appropriate error', () async {
+    test('network error throws', () async {
       fakeApi.setError('Connection refused');
 
-      final result = await authService.salesrepSignIn('test@example.com', 'password');
-      expect(result, isFalse);
-      expect(authService.status, equals(AuthStatus.unauthenticated));
-      expect(authService.authError, isNotNull);
+      expect(
+        () => authService.signinHandler({'email': 'test@example.com', 'password': 'password'}),
+        throwsException,
+      );
     });
   });
 
-  group('signOut', () {
-    test('signout clears session and resets status', () async {
-      fakeApi.setResponse({
-        'csrf_token': 'test-csrf',
-        'status': 'success',
-        'data': {'user': {'id': 1, 'name': 'Test User'}}
-      });
-      await authService.salesrepSignIn('test@example.com', 'password');
+  group('signoutHandler', () {
+    test('signout clears local session', () async {
+      fakeApi.queueResponses([
+        {'csrf_token': 'test-csrf'},
+        {'status': 'success'},
+        {
+          'id': 1,
+          'name': '測試業務',
+          'email': 'test@example.com',
+          'utype': 'salesrep',
+          'is_auth': true,
+          'session_expires_at': '2026-12-31T23:59:59Z',
+        },
+      ]);
+      await authService.signinHandler({'email': 'test@example.com', 'password': 'password'});
 
-      await authService.signOut();
-      expect(authService.status, equals(AuthStatus.unauthenticated));
-      expect(authService.sessionInfoValue, isNull);
-      expect(authService.authError, isNull);
+      await authService.signoutHandler();
+      expect(authService.isLogin, isFalse);
+      expect(authService.sessionInfoSignal.value, isNull);
     });
   });
 
   group('initial state', () {
-    test('starts with unknown status', () {
-      expect(authService.status, equals(AuthStatus.unknown));
-      expect(authService.sessionInfoValue, isNull);
-      expect(authService.isLoggedIn, isFalse);
+    test('starts not logged in', () {
+      expect(authService.isLogin, isFalse);
+      expect(authService.sessionInfoSignal.value, isNull);
     });
   });
 }
@@ -1851,88 +1993,6 @@ Phase 1: Tasks 1-6 (可部分並行)
 Phase 2: Tasks 7-8 (依序，Task 8 依賴 Task 7)
 Phase 3: Tasks 9-12 (可部分並行)
 Phase 4: Tasks 13-17 (可部分並行)
-```
-
----
-
-### Task 12b: CustomerService 基本操作測試（P1）
-
-**Files:**
-- Create: `test/unit/services/customer_service_test.dart`
-
-**Interfaces:**
-- Consumes: `CustomerService`（現有 customer_service.dart，Task 8 改名）、Fake API 模式
-- Produces: search happy path + error path 測試
-
-- [ ] **Step 1: 撰寫 CustomerService 測試**
-
-```dart
-// test/unit/services/customer_service_test.dart
-import 'dart:io';
-import 'package:flutter_test/flutter_test.dart';
-import 'package:hexagon_food_app/layer_business/services/customer/customer_service.dart';
-import 'package:hexagon_food_app/layer_data/models/customer/customer.dart';
-import 'package:dio/dio.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import '../../helpers/fake_api.dart';
-import '../../auth/fake_path_provider.dart';
-
-class FakeCustomerApi extends CustomerApiType {
-  dynamic _nextResponse;
-  String? _simulateError;
-  void setResponse(dynamic r) => _nextResponse = r;
-  void setError(String e) => _simulateError = e;
-
-  @override Future<Response> getCustomers(Map<String, dynamic> filter, Options options) async {
-    if (_simulateError != null) throw DioException(requestOptions: RequestOptions(path: ''), message: _simulateError);
-    return Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
-  }
-  @override Future<Response> getCustomer(int id, Options options) async {
-    return Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
-  }
-  @override Future<Response> createCustomer(Map<String, dynamic> data, Options options) async {
-    return Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
-  }
-  @override Future<Response> updateCustomer(int id, Map<String, dynamic> data, Options options) async {
-    return Response(requestOptions: RequestOptions(path: ''), data: _nextResponse);
-  }
-  @override Future<void> removeCookies() async {}
-}
-
-void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-  registerFakePathProvider();
-  sqfliteFfiInit();
-  databaseFactory = databaseFactoryFfi;
-
-  late FakeCustomerApi fakeApi;
-  late CustomerService customerService;
-
-  setUp(() {
-    fakeApi = FakeCustomerApi();
-    // CustomerService 需要 BuildContext，這裡只測核心邏輯層
-  });
-
-  group('CustomerService search', () {
-    test('search returns customer list on success', () async {
-      // 注意：CustomerService 依賴 BuildContext (disco)，
-      // 完整測試需 pump widget。此處僅展示測試結構。
-      // 實際測試需在 widget test 中進行。
-    });
-  });
-}
-```
-
-> **注意**：`CustomerService` 與 `SalesOrderService` 依賴 `BuildContext`（因使用 disco）。
-> 完整測試需透過 widget test pump 一個 `ProviderScope`，此處骨架將在階段 3 後續迭代中補完。
-> 本 task 產出測試骨架，P1 服務層測試的完整實作建議在 Task 7-8 完成後，
-> 使用 `pumpApp` helper 進行 widget-level 整合測試。
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add sales-order-app/test/unit/services/customer_service_test.dart
-git commit -m "test: add CustomerService test skeleton (P1)"
 ```
 
 ---
