@@ -47,17 +47,33 @@ jobs:
       - name: Build iOS (no sign)
         working-directory: sales-order-app
         run: |
+          # dev flavor has no Release-dev Xcode config (only Debug-dev/Profile-dev),
+          # so dev builds as debug; prod builds as release. Output dir is
+          # build/ios/<Configuration>-iphoneos/ in both cases.
           if [ "${{ inputs.flavor }}" = "prod" ]; then
             flutter build ios --flavor prod --target lib/main_prod.dart --no-codesign
           else
-            flutter build ios --flavor dev --target lib/main_dev.dart --no-codesign
+            flutter build ios --flavor dev --target lib/main_dev.dart --debug --no-codesign
           fi
 
       - name: Package IPA
         working-directory: sales-order-app
         run: |
+          # Flavor builds output to build/ios/<Configuration>-iphoneos/ (e.g.
+          # Release-prod-iphoneos), NOT Release-iphoneos; PRODUCT_NAME may also
+          # carry a flavor suffix ("Runner Dev.app"). Resolve dynamically.
+          APP_DIR=$(ls -d build/ios/*-iphoneos 2>/dev/null | head -1)
+          if [ -z "$APP_DIR" ] || [ ! -d "$APP_DIR" ]; then
+            echo "No build/ios/*-iphoneos output found" >&2
+            exit 1
+          fi
+          APP_BUNDLE=$(find "$APP_DIR" -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$APP_BUNDLE" ]; then
+            echo "No .app bundle found in $APP_DIR" >&2
+            exit 1
+          fi
           mkdir -p Payload
-          cp -r build/ios/Release-iphoneos/Runner.app Payload/
+          cp -r "$APP_BUNDLE" Payload/
           zip -r app-${{ inputs.flavor }}.ipa Payload/
           rm -rf Payload
 
