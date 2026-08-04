@@ -180,6 +180,58 @@ func TestETagMiddleware_HeaderPreserved(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want application/json preserved", rec.Header().Get("Content-Type"))
 	}
 }
+
+func TestETagMiddleware_WebSocketUpgradePassthrough(t *testing.T) {
+	// WS 需要 http.Hijacker；緩衝會破壞升級 — middleware 必須透傳。
+	hijacked := false
+	handler := ETagMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("handler received non-Hijacker writer — upgrade would fail")
+		}
+		hijacked = true
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dispatches/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !hijacked {
+		t.Fatal("handler not reached with Hijacker writer")
+	}
+	if rec.Header().Get("ETag") != "" {
+		t.Fatal("ETag set on WS upgrade")
+	}
+}
+
+func TestETagMiddleware_SSEPassthrough(t *testing.T) {
+	// SSE 需要 http.Flusher；緩衝會讓串流 byte 卡到 handler 結束才送出。
+	flushed := false
+	handler := ETagMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("handler received non-Flusher writer — SSE streaming would fail")
+		}
+		flushed = true
+		_, _ = w.Write([]byte("data: ping\n\n"))
+		w.(http.Flusher).Flush()
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sales_orders/dispatches/sse", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if !flushed {
+		t.Fatal("handler not reached with Flusher writer")
+	}
+	if rec.Header().Get("ETag") != "" {
+		t.Fatal("ETag set on SSE")
+	}
+}
 ```
 
 - [ ] **Step 2: 執行測試確認 fail**
@@ -207,9 +259,17 @@ import (
 
 // ETagMiddleware 為 GET 回應計算 ETag，並處理 If-None-Match → 304。
 // 只套用於 API GET 請求；非 GET 直接放行。
+// WebSocket（Upgrade）與 SSE（text/event-stream）請求直接透傳 —
+// bodyBufferWriter 不實作 http.Flusher/http.Hijacker，緩衝會破壞串流。
 func ETagMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// 串流/升級請求不緩衝：WS 需要 Hijacker、SSE 需要 Flusher
+		if r.Header.Get("Upgrade") != "" ||
+			strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -231,14 +291,14 @@ func ETagMiddleware(next http.Handler) http.Handler {
 		// If-None-Match 相符 → 304 無 body
 		if match := r.Header.Get("If-None-Match"); match != "" {
 			if strings.Contains(match, etag) || match == "*" {
-				bw.header.Set("ETag", etag)
+				bw.Header().Set("ETag", etag)
 				bw.WriteHeader(http.StatusNotModified)
 				bw.flush()
 				return
 			}
 		}
 
-		bw.header.Set("ETag", etag)
+		bw.Header().Set("ETag", etag)
 		bw.flush()
 	})
 }

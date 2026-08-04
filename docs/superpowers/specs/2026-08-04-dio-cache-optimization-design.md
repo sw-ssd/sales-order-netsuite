@@ -86,9 +86,17 @@ import (
 
 // ETagMiddleware 為 GET 回應計算 ETag，並處理 If-None-Match → 304。
 // 只套用於 API GET 請求；非 GET 直接放行。
+// WebSocket（Upgrade）與 SSE（text/event-stream）請求直接透傳 —
+// bodyBufferWriter 不實作 http.Flusher/http.Hijacker，緩衝會破壞串流。
 func ETagMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// 串流/升級請求不緩衝：WS 需要 Hijacker、SSE 需要 Flusher
+		if r.Header.Get("Upgrade") != "" ||
+			strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -323,6 +331,8 @@ if strings.HasPrefix(r.URL.Path, "/api/v1/metadicts") ||
 6. 非 200（404/500）→ 不設 ETag，**status code 與 body 正確輸出**（flush 回歸測試）
 7. 空 body 200 → 不設 ETag
 8. 304 時 body 為空（flush 跳過 body）
+9. **`Upgrade: websocket` 請求 → 直接透傳（不緩衝），handler 可 Hijack**
+10. **`Accept: text/event-stream` 請求 → 直接透傳，handler 可 Flush**
 
 `internal/middleware/public_cache_test.go`：
 1. `/api` + 無 `X-App-Client` header → `Cache-Control: private, no-cache`
@@ -356,6 +366,7 @@ if strings.HasPrefix(r.URL.Path, "/api/v1/metadicts") ||
 
 | 風險 | 影響 | 緩解 |
 |------|------|------|
+| **ETag 全域掛載破壞 SSE/WebSocket** | 高 — bodyBufferWriter 無 Flusher/Hijacker，串流端點 500/無法升級（frontend WS live 更新失效） | ETagMiddleware 對 Upgrade / text/event-stream 請求直接透傳；回歸測試（9、10） |
 | 瀏覽器（frontend）拿到 max-age 被快取 | 消除 — client 區分保證瀏覽器只拿 `no-cache` | `X-App-Client` header 區分；瀏覽器請求無此 header |
 | App 端遺漏 `X-App-Client` header 致拿 no-cache | 低 — 退化成 revalidate（仍正確，只多 304 round-trip） | App 端 dio 統一送 header |
 | body 緩衝記憶體 | GET 列表 body 多一份緩衝 | 目前 API 分頁規模可接受；若有大檔案下載需排除 |
