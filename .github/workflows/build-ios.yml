@@ -1,0 +1,68 @@
+# .github/workflows/build-ios.yml
+name: Build iOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: 'Flavor (dev or prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Read Flutter version from .fvmrc
+        id: fvm
+        run: |
+          FVM_VERSION=$(cat sales-order-app/.fvmrc | jq -r '.flutter')
+          echo "version=$FVM_VERSION" >> $GITHUB_OUTPUT
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fvm.outputs.version }}
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: sales-order-app
+        run: flutter pub get
+
+      - name: Run code generation
+        working-directory: sales-order-app
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Install CocoaPods
+        working-directory: sales-order-app/ios
+        run: pod install
+
+      - name: Build iOS (no sign)
+        working-directory: sales-order-app
+        run: |
+          if [ "${{ inputs.flavor }}" = "prod" ]; then
+            flutter build ios --flavor prod --target lib/main_prod.dart --no-codesign
+          else
+            flutter build ios --flavor dev --target lib/main_dev.dart --no-codesign
+          fi
+
+      - name: Package IPA
+        working-directory: sales-order-app
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/Release-iphoneos/Runner.app Payload/
+          zip -r app-${{ inputs.flavor }}.ipa Payload/
+          rm -rf Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ inputs.flavor }}-ios
+          path: sales-order-app/app-${{ inputs.flavor }}.ipa
