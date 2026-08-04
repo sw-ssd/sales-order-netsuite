@@ -89,36 +89,50 @@ func ETagMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 包一層 ResponseWriter 緩衝 body，寫入後計算 hash
+		// 包一層 ResponseWriter 緩衝 header + body，handler 結束後統一輸出，
+		// 這樣才能先算 hash 再決定回 304 或完整 body。
 		bw := &bodyBufferWriter{ResponseWriter: w}
 		next.ServeHTTP(bw, r)
 
-		// 只有成功回應才設 ETag
-		if bw.statusCode != http.StatusOK {
+		// 非 200 或無 body：原樣輸出（不設 ETag，不判 304）
+		if bw.statusCode != http.StatusOK || bw.body.Len() == 0 {
+			bw.flush()
 			return
 		}
 
 		hash := sha256.Sum256(bw.body.Bytes())
 		etag := `"` + hex.EncodeToString(hash[:16]) + `"` // 128-bit 足夠
 
-		// 304：後續 header 已由 handler 寫入，body 不輸出
+		// If-None-Match 相符 → 304 無 body
 		if match := r.Header.Get("If-None-Match"); match != "" {
 			if strings.Contains(match, etag) || match == "*" {
-				w.WriteHeader(http.StatusNotModified)
+				bw.header.Set("ETag", etag)
+				bw.WriteHeader(http.StatusNotModified)
+				bw.flush()
 				return
 			}
 		}
 
-		// 正常輸出（ETag header 需在 WriteHeader 前設定）
-		w.Header().Set("ETag", etag)
-		_, _ = w.Write(bw.body.Bytes())
+		bw.header.Set("ETag", etag)
+		bw.flush()
 	})
 }
 
+// bodyBufferWriter 緩衝 statusCode、headers、body，由 flush() 統一輸出到
+// 底層 ResponseWriter。避免「先寫出再後悔」——ETag 需完整 body 才能計算。
 type bodyBufferWriter struct {
 	http.ResponseWriter
+	header     http.Header
 	body       bytes.Buffer
 	statusCode int
+	flushed    bool
+}
+
+func (b *bodyBufferWriter) Header() http.Header {
+	if b.header == nil {
+		b.header = http.Header{}
+	}
+	return b.header
 }
 
 func (b *bodyBufferWriter) WriteHeader(code int) {
@@ -127,6 +141,31 @@ func (b *bodyBufferWriter) WriteHeader(code int) {
 
 func (b *bodyBufferWriter) Write(p []byte) (int, error) {
 	return b.body.Write(p)
+}
+
+// flush 將緩衝內容實際寫入底層 ResponseWriter。
+// 先複製 header（含 handler 設定的 Content-Type 等），再寫 status + body。
+func (b *bodyBufferWriter) flush() {
+	if b.flushed {
+		return
+	}
+	b.flushed = true
+
+	// 複製所有 header（ETag 等由 middleware 在 flush 前設定）
+	for k, vv := range b.header {
+		for _, v := range vv {
+			b.ResponseWriter.Header().Add(k, v)
+		}
+	}
+
+	code := b.statusCode
+	if code == 0 {
+		code = http.StatusOK
+	}
+	b.ResponseWriter.WriteHeader(code)
+	if code != http.StatusNoContent && code != http.StatusNotModified {
+		_, _ = b.ResponseWriter.Write(b.body.Bytes())
+	}
 }
 ```
 
@@ -162,9 +201,9 @@ func PublicCacheMiddleware(next http.Handler) http.Handler {
 |------|------|------|
 | Hash 演算法 | SHA-256 取前 16 bytes | 128-bit 對緩存用途碰撞率足夠 |
 | 只 GET | 非 GET 放行 | POST/PUT/PATCH 不該被緩存 |
-| 只 200 | 非 200 不設 ETag | 錯誤回應不緩存 |
-| 304 不寫 body | `WriteHeader(304)` 後 return | 標準 HTTP 語義，省傳輸 |
-| body 緩衝 | `bodyBufferWriter` | 需先算 hash 才能設 ETag header；列表規模可接受 |
+| 只 200 且有 body | 非 200 或空 body 不設 ETag | 錯誤回應不緩存；304/204 無 body |
+| 304 不寫 body | `flush()` 時 304 跳過 body | 標準 HTTP 語義，省傳輸 |
+| body 緩衝 | `bodyBufferWriter` 緩衝 header+body，`flush()` 統一輸出 | 需先算 hash 才能設 ETag；同時避免「先寫出後悔」（非 200 也能正確輸出） |
 
 ---
 
@@ -240,9 +279,11 @@ CacheOptions _buildCacheOptions({
 1. GET 200 回應帶 `ETag` header，值為 `"<hex>"` 格式
 2. 相同 body 兩次請求 ETag 相同
 3. 帶 `If-None-Match` 且相符 → 304 且無 body
-4. 帶 `If-None-Match` 不相符 → 200 完整 body
-5. 非 GET（POST）→ 不設 ETag
-6. 非 200（404/500）→ 不設 ETag
+4. 帶 `If-None-Match` 不相符 → 200 完整 body + ETag
+5. 非 GET（POST）→ 不設 ETag，body 正常輸出
+6. 非 200（404/500）→ 不設 ETag，**status code 與 body 正確輸出**（flush 回歸測試）
+7. 空 body 200 → 不設 ETag
+8. 304 時 body 為空（flush 跳過 body）
 
 `internal/middleware/public_cache_test.go`（若有既有測試則擴充）：
 1. `/api` 路徑 → `Cache-Control: private, no-cache`
