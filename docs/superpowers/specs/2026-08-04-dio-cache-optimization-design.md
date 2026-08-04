@@ -8,7 +8,7 @@
 
 ## 目標
 
-讓 Flutter App 的 dio cache 真正運作：後端加 ETag 支援 HTTP revalidation，App 端修正 cache 配置（錯誤碼、斷網 fallback、死碼清理）。**Web frontend（sales-order-frontend）零改動、零行為影響。**
+讓 Flutter App 的 dio cache 真正運作：後端加 ETag 支援 HTTP revalidation，並依 client 區分 Cache-Control（App 拿 `max-age` 零請求命中、瀏覽器拿 `no-cache` 不受影響），App 端修正 cache 配置（錯誤碼、斷網 fallback、死碼清理）。**Web frontend（sales-order-frontend）零改動、零行為影響。**
 
 ## 背景：根因分析
 
@@ -56,12 +56,16 @@ flowchart LR
 
 ### 核心機制
 
-後端加 ETag middleware：所有 GET response 計算 body hash → `ETag: <hash>`；收到 `If-None-Match` 且相符回 304 空 body。兩端受益：
+後端加 ETag middleware：所有 GET response 計算 body hash → `ETag: <hash>`；收到 `If-None-Match` 且相符回 304 空 body。
 
-- **Flutter App（dio）**：`request` policy 之前因無 cache headers 永不寫入 → 有 ETag 後可寫入；過期後自動帶 `If-None-Match` revalidate，304 時用 cache body（省傳輸、省解析）。
-- **Web frontend**：瀏覽器原生快取行為，304 完全透明，資料永遠最新（`no-cache` revalidate 語義），零改動。
+**Client 區分（設計修正 2026-08-04）**：驗證後發現 dio 的 `maxStale` option 只控制 cache entry 生命週期（`isStaled`），**不提供「maxStale 內直接命中」**；直接命中需要 response 帶 `max-age`，但 `max-age` 會讓瀏覽器（frontend）也快取同等時間。為同時滿足「App 零請求命中」與「frontend 零影響」，後端依自訂 header 區分 client：
 
-**關鍵約束**：`Cache-Control` 從 `no-cache, no-store` 改為 `private, no-cache` — 保留 revalidate 語義、絕不 `public`（避免已登入用戶資料被共享快取串到其他用戶）。
+- **`X-App-Client: mobile`**（Flutter App 的 dio 送）→ `Cache-Control: private, max-age=<TTL>`（App 直接命中，零請求）
+- **無該 header**（瀏覽器 frontend）→ `Cache-Control: private, no-cache`（每次 revalidate，與現況等價）
+
+兩者都帶 ETag（revalidate 備援：App 端 max-age 過期後仍可 304 更新；瀏覽器每次 304 省 body）。
+
+**關鍵約束**：一律 `private`、絕不 `public`（避免已登入用戶資料被共享快取串到其他用戶）。
 
 ---
 
@@ -182,10 +186,18 @@ s.router.Use(middleware.ETagMiddleware)
 ```go
 func PublicCacheMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// API 路由：private, no-cache — 允許 client 存 cache 但每次 revalidate
-		// （配合 ETag 做條件請求）。絕不 public，避免已登入用戶資料被共享。
+		// API 路由：依 client 區分 Cache-Control。
+		// - Flutter App（送 X-App-Client: mobile）→ private, max-age=<TTL>，
+		//   dio 可直接命中 cache（零請求），過期後靠 ETag 304 更新。
+		// - 瀏覽器（frontend，無該 header）→ private, no-cache，每次 revalidate，
+		//   與現況等價、零影響。
+		// 一律 private、絕不 public（避免已登入用戶資料被共享快取串到其他用戶）。
 		if strings.HasPrefix(r.URL.Path, "/api") {
-			w.Header().Set("Cache-Control", "private, no-cache")
+			if r.Header.Get("X-App-Client") == "mobile" {
+				w.Header().Set("Cache-Control", "private, max-age=300")
+			} else {
+				w.Header().Set("Cache-Control", "private, no-cache")
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -194,6 +206,8 @@ func PublicCacheMiddleware(next http.Handler) http.Handler {
 	})
 }
 ```
+
+> **注意**：此處 max-age=300 為預設值；「各端點 Cache 策略對照」表中的不同 TTL（lgCache 8hr）需要在 ETagMiddleware 或依路徑進一步細分。為控制 scope，本設計以「App 統一 max-age=300、瀏覽器 no-cache」為最小可行方案；若需 per-endpoint TTL（8hr 字典），在 ETagMiddleware 中依路徑前綴覆寫 max-age（見「TTL 細分（可選）」）。
 
 ### 後端設計決策
 
@@ -208,6 +222,16 @@ func PublicCacheMiddleware(next http.Handler) http.Handler {
 ---
 
 ## App 端變更
+
+### 送 `X-App-Client: mobile` header
+
+`lib/layer_business/network/auth_interceptor.dart` 的 `onRequest` 加入：
+
+```dart
+options.headers['X-App-Client'] = 'mobile';
+```
+
+（與現有 `Accept` header 設定同位置；後端依此區分 Cache-Control。）
 
 ### `lib/layer_data/repositories/cache_storage.dart`
 
@@ -245,28 +269,43 @@ CacheOptions _buildCacheOptions({
 
 ## 各端點 Cache 策略對照
 
-| API | 資料特性 | 策略 | TTL | 理由 |
-|-----|----------|------|-----|------|
-| metadict | 字典資料，少變動 | `request` + ETag | 8hr | 下拉選單資料 |
-| article | 商品文章，少變動 | `request` + ETag | 8hr | 首頁內容 |
-| department | 部門清單，少變動 | `request` + ETag | 8hr | 部門下拉 |
-| customer | 客戶資料，中頻變動 | `request` + ETag | 5min | 列表/詳情 |
-| salesorder | 訂單，高頻變動 | `request` + ETag | 5min | 訂單列表 |
-| estimate | 估價項目，中頻 | `request` + ETag | 5min | 估價下拉 |
-| auth / me / csrf | 敏感，即時 | `noCache` | — | 登入狀態不緩存 |
-| 下拉刷新 | — | `refreshForceCache` | — | 強制重抓 + 更新 ETag |
+| API | 資料特性 | App 端策略 | App max-age | 瀏覽器 |
+|-----|----------|-----------|-------------|--------|
+| metadict | 字典資料，少變動 | `request` + ETag | 8hr（可選細分） | no-cache |
+| article | 商品文章，少變動 | `request` + ETag | 8hr（可選細分） | no-cache |
+| department | 部門清單，少變動 | `request` + ETag | 8hr（可選細分） | no-cache |
+| customer | 客戶資料，中頻變動 | `request` + ETag | 5min | no-cache |
+| salesorder | 訂單，高頻變動 | `request` + ETag | 5min | no-cache |
+| estimate | 估價項目，中頻 | `request` + ETag | 5min | no-cache |
+| auth / me / csrf | 敏感，即時 | `noCache` | — | — |
+| 下拉刷新 | — | `refreshForceCache` | — | — |
 
-### 修復後行為
+> 最小可行方案：App 統一 max-age=300（5min）。per-endpoint 細分（字典 8hr）為可選，見「TTL 細分（可選）」。
+
+### 修復後行為（App，client 區分後）
 
 ```
-首次進頁面  → 網路請求 200 + ETag → 寫入 cache
-5min 內再進 → cache 直接命中（零網路）
+首次進頁面  → 網路請求 200 + ETag + max-age=300 → 寫入 cache
+5min 內再進 → cache 直接命中（零網路請求）
 超過 5min   → 帶 If-None-Match revalidate
                ├─ 304 → 用 cache body（省傳輸）
-               └─ 200 → 更新 cache + ETag
+               └─ 200 → 更新 cache + ETag + max-age
 下拉刷新    → refreshForceCache 強制重抓 → 更新 cache + ETag
 斷網        → hitCacheOnNetworkFailure → 顯示 cache 舊資料
 伺服器 404/500 → hitCacheOnErrorCodes → 嘗試 cache fallback
+```
+
+### TTL 細分（可選，非本次範圍）
+
+若需字典端點 8hr 命中，在 ETagMiddleware 中依路徑前綴覆寫 max-age：
+
+```go
+// metadict/article/department 端點 → max-age=28800；其餘 → 維持 300
+if strings.HasPrefix(r.URL.Path, "/api/v1/metadicts") ||
+   strings.HasPrefix(r.URL.Path, "/api/v1/articles") ||
+   strings.HasPrefix(r.URL.Path, "/api/v1/departments") {
+    w.Header().Set("Cache-Control", "private, max-age=28800")
+}
 ```
 
 ---
@@ -285,14 +324,17 @@ CacheOptions _buildCacheOptions({
 7. 空 body 200 → 不設 ETag
 8. 304 時 body 為空（flush 跳過 body）
 
-`internal/middleware/public_cache_test.go`（若有既有測試則擴充）：
-1. `/api` 路徑 → `Cache-Control: private, no-cache`
-2. 非 `/api` 路徑 → `public, max-age=300, s-maxage=600`（不變）
+`internal/middleware/public_cache_test.go`：
+1. `/api` + 無 `X-App-Client` header → `Cache-Control: private, no-cache`
+2. `/api` + `X-App-Client: mobile` → `Cache-Control: private, max-age=300`
+3. 非 `/api` 路徑 → `public, max-age=300, s-maxage=600`（不變）
 
 ### App（Flutter）
 
 - 既有測試維持通過（auth 相關測試不受影響 — auth 走 `noCache`）
-- 新增 cache_storage 配置測試（若可行）：`hitCacheOnErrorCodes` 不含 400、`hitCacheOnNetworkFailure` 為 true
+- 新增 `X-App-Client: mobile` header 測試：AuthInterceptor `onRequest` 後 request headers 含該值
+- 新增 cache_storage 配置測試：`hitCacheOnErrorCodes` 不含 400、`hitCacheOnNetworkFailure` 為 true
+- 新增 dio ETag 整合測試（MemCacheStore）：200 + ETag + max-age response 寫入 cache；max-age 內第二次請求零網路（`extraFromNetworkKey == false`）
 - 整合驗證（手動，非自動化）：起後端 + 跑 App，用 Talker logger 觀察請求數 — 第一次 200、5min 內第二次 0 請求、過期後 1 次 304
 
 ### Frontend（Web）
@@ -314,7 +356,8 @@ CacheOptions _buildCacheOptions({
 
 | 風險 | 影響 | 緩解 |
 |------|------|------|
-| `private, no-cache` 改變 frontend 瀏覽器行為 | 低 — no-cache revalidate 語義與現況（每次 full 200）等價，304 更快 | 手動驗證 frontend 頁面 |
+| 瀏覽器（frontend）拿到 max-age 被快取 | 消除 — client 區分保證瀏覽器只拿 `no-cache` | `X-App-Client` header 區分；瀏覽器請求無此 header |
+| App 端遺漏 `X-App-Client` header 致拿 no-cache | 低 — 退化成 revalidate（仍正確，只多 304 round-trip） | App 端 dio 統一送 header |
 | body 緩衝記憶體 | GET 列表 body 多一份緩衝 | 目前 API 分頁規模可接受；若有大檔案下載需排除 |
 | ETag hash 碰撞 | 極低 — SHA-256 前 16 bytes (128-bit) | 緩存用途碰撞率可忽略 |
 | `hitCacheOnNetworkFailure` 顯示舊資料無提示 | 使用者可能困惑 | 可接受（離線模式）；後續可在 UI 加 stale 提示（非本次範圍） |
