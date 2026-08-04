@@ -138,8 +138,21 @@ class CustomerFormDraftProvider {
 
 EditScreen init 流程：
 1. `editingCustomerId` 已設為目標 id
-2. 若 Provider 已有草稿且 `editingCustomerId` 相符 → 直接用草稿（401 殘留）
+2. 若 Provider 已有草稿且 `editingCustomerId` 相符 → 直接用草稿（401 殘留），並恢復 `currentStep`（`setStep`）
 3. 否則依 id 呼叫 `customerApi.get(id)` 載入 → `setDraft(customer)`
+
+---
+
+## 遷移策略（方案 A — 先建骨架再搬遷）
+
+| 步驟 | 內容 | 產出 |
+|------|------|------|
+| 1 | 建 `CustomerFormDraftProvider` + 註冊（customerLayout 的 ProviderScope）| 草稿容器 |
+| 2 | 建 `/customer/create`、`/customer/edit/:id` 路由 + `CustomerCreateScreen`/`CustomerEditScreen` 骨架（stepper 空殼）| 可導航的路由 |
+| 3 | 搬 `_mainContent` 表單內容 → stepper 步驟 1（主要資料）| 步驟 1 可用 |
+| 4 | 搬 `_addressContent` → 步驟 2；`_contactsContent` → 步驟 3 | 全部步驟可用 |
+| 5 | 移除 `modal_service.dart` 的 `modalCreateShow`/`modalEditShow`（保留 `modalQRCodeShow`）；更新呼叫點改 `pushPath` | 舊 modal 移除 |
+| 6 | 清理：`modal_service.dart` 縮小到只剩 QRCode 邏輯；`routes.gr.dart` 重新生成 | 乾淨 |
 
 ---
 
