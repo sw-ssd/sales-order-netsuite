@@ -69,3 +69,17 @@ jobs:
         with:
           name: app-${{ inputs.flavor }}-release
           path: sales-order-app/build/app/outputs/bundle/${{ inputs.flavor }}Release/app-${{ inputs.flavor }}-release.aab
+
+      - name: Setup Ruby and Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: sales-order-app/android
+
+      - name: Upload to Play Store (beta)
+        if: inputs.flavor == 'prod'
+        env:
+          PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
+        working-directory: sales-order-app/android
+        run: bundle exec fastlane beta

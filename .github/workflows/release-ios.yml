@@ -1,0 +1,81 @@
+# .github/workflows/release-ios.yml
+name: Release iOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Read Flutter version from .fvmrc
+        id: fvm
+        run: |
+          FVM_VERSION=$(cat sales-order-app/.fvmrc | jq -r '.flutter')
+          echo "version=$FVM_VERSION" >> $GITHUB_OUTPUT
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fvm.outputs.version }}
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: sales-order-app
+        run: flutter pub get
+
+      - name: Run code generation
+        working-directory: sales-order-app
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Setup Ruby and Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: sales-order-app/ios
+
+      - name: Setup iOS signing (requires secrets)
+        # 需要 Apple Developer 憑證：distribution certificate + provisioning
+        # profile。兩種方式擇一（依專案現況）：
+        #   A) fastlane match（需 MATCH_* secrets 與 match repo）
+        #   B) 手動 import：CERTIFICATE_BASE64 + CERT_PASSWORD + PROFILE_BASE64
+        #      放入 .p12 / .mobileprovision 並寫入 keychain。
+        # 未設定簽署時 build ipa 會失敗 — 這是部署前的必要前置。
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "$CERTIFICATE_BASE64" ] || [ -z "$PROFILE_BASE64" ]; then
+            echo "::warning::iOS signing secrets not configured — TestFlight upload will fail."
+            exit 0
+          fi
+          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          echo "$CERTIFICATE_BASE64" | base64 --decode > $CERT_PATH
+          echo "$PROFILE_BASE64" | base64 --decode > $PP_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $CERT_PATH -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      - name: Build and upload to TestFlight
+        working-directory: sales-order-app
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
+        run: |
+          # 先建置簽署的 prod IPA（Task 3 的 no-codesign 流程不適用上傳）
+          flutter build ipa --flavor prod --target lib/main_prod.dart
+          # fastlane beta 上傳 build/ios/ipa/*.ipa 至 TestFlight
+          cd ios && bundle exec fastlane beta
