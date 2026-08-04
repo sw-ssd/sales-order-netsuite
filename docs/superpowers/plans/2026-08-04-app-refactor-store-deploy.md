@@ -153,6 +153,7 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEY_PROPERTIES: ${{ secrets.ANDROID_KEY_PROPERTIES }}
         run: |
+          mkdir -p sales-order-app/android/keystore
           echo "$KEYSTORE_BASE64" | base64 -d > sales-order-app/android/keystore/hexagon-salesorder-keystore.jks
           echo "$KEY_PROPERTIES" > sales-order-app/android/key.properties
 
@@ -250,17 +251,33 @@ jobs:
       - name: Build iOS (no sign)
         working-directory: sales-order-app
         run: |
+          # dev flavor has no Release-dev Xcode config (only Debug-dev/Profile-dev),
+          # so dev builds as debug; prod builds as release. Output dir is
+          # build/ios/<Configuration>-iphoneos/ in both cases.
           if [ "${{ inputs.flavor }}" = "prod" ]; then
             flutter build ios --flavor prod --target lib/main_prod.dart --no-codesign
           else
-            flutter build ios --flavor dev --target lib/main_dev.dart --no-codesign
+            flutter build ios --flavor dev --target lib/main_dev.dart --debug --no-codesign
           fi
 
       - name: Package IPA
         working-directory: sales-order-app
         run: |
+          # Flavor builds output to build/ios/<Configuration>-iphoneos/ (e.g.
+          # Release-prod-iphoneos), NOT Release-iphoneos; PRODUCT_NAME may also
+          # carry a flavor suffix ("Runner Dev.app"). Resolve dynamically.
+          APP_DIR=$(ls -d build/ios/*-iphoneos 2>/dev/null | head -1)
+          if [ -z "$APP_DIR" ] || [ ! -d "$APP_DIR" ]; then
+            echo "No build/ios/*-iphoneos output found" >&2
+            exit 1
+          fi
+          APP_BUNDLE=$(find "$APP_DIR" -maxdepth 1 -name "*.app" | head -1)
+          if [ -z "$APP_BUNDLE" ]; then
+            echo "No .app bundle found in $APP_DIR" >&2
+            exit 1
+          fi
           mkdir -p Payload
-          cp -r build/ios/Release-iphoneos/Runner.app Payload/
+          cp -r "$APP_BUNDLE" Payload/
           zip -r app-${{ inputs.flavor }}.ipa Payload/
           rm -rf Payload
 
@@ -1740,7 +1757,13 @@ default_platform(:ios)
 platform :ios do
   desc "Push a new beta build to TestFlight"
   lane :beta do
+    # 顯式指定 IPA 路徑（相對 fastlane 執行目錄 ios/）。
+    # upload_to_testflight 預設 Dir["*.ipa"] 非遞迴，在 ios/ cwd 找不到
+    # ../build/ios/ipa/ 的產物（與 Android lane 顯式傳 aab: 同模式）。
+    ipa_path = Dir["../build/ios/ipa/*.ipa"].last
+    UI.user_error!("找不到 IPA：../build/ios/ipa/*.ipa") if ipa_path.nil?
     upload_to_testflight(
+      ipa: ipa_path,
       skip_waiting_for_build_processing: false,
     )
   end
@@ -1912,13 +1935,47 @@ jobs:
           bundler-cache: true
           working-directory: sales-order-app/ios
 
+      - name: Setup iOS signing (requires secrets)
+        # 需要 Apple Developer 憑證：distribution certificate + provisioning
+        # profile。兩種方式擇一（依專案現況）：
+        #   A) fastlane match（需 MATCH_* secrets 與 match repo）
+        #   B) 手動 import：CERTIFICATE_BASE64 + CERT_PASSWORD + PROFILE_BASE64
+        #      放入 .p12 / .mobileprovision 並寫入 keychain。
+        # 未設定簽署時 build ipa 會失敗 — 這是部署前的必要前置。
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+          PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "$CERTIFICATE_BASE64" ] || [ -z "$PROFILE_BASE64" ]; then
+            echo "::warning::iOS signing secrets not configured — TestFlight upload will fail."
+            exit 0
+          fi
+          CERT_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          echo "$CERTIFICATE_BASE64" | base64 --decode > $CERT_PATH
+          echo "$PROFILE_BASE64" | base64 --decode > $PP_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security import $CERT_PATH -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+
       - name: Build and upload to TestFlight
-        working-directory: sales-order-app/ios
+        working-directory: sales-order-app
         env:
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY }}
-        run: bundle exec fastlane beta
+        run: |
+          # 先建置簽署的 prod IPA（Task 3 的 no-codesign 流程不適用上傳）
+          flutter build ipa --flavor prod --target lib/main_prod.dart
+          # fastlane beta 上傳 build/ios/ipa/*.ipa 至 TestFlight
+          cd ios && bundle exec fastlane beta
 ```
 
 - [ ] **Step 3: Commit**
