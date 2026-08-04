@@ -43,6 +43,7 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEY_PROPERTIES: ${{ secrets.ANDROID_KEY_PROPERTIES }}
         run: |
+          mkdir -p sales-order-app/android/keystore
           echo "$KEYSTORE_BASE64" | base64 -d > sales-order-app/android/keystore/hexagon-salesorder-keystore.jks
           echo "$KEY_PROPERTIES" > sales-order-app/android/key.properties
 
