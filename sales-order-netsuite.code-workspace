@@ -1,17 +1,31 @@
 {
   "folders": [
     {
-      "name": "backend",
-      "path": "sales-order-backend"
+      "name": "app",
+      "path": "sales-order-app"
     },
     {
       "name": "frontend",
       "path": "sales-order-frontend"
     },
     {
-      "name": "app",
-      "path": "sales-order-app"
+      "name": "backend",
+      "path": "sales-order-backend"
     }
   ],
-  "settings": {}
+  "settings": {
+    "sqltools.connections": [
+      {
+        "ssh": "Disabled",
+        "previewLimit": 50,
+        "server": "localhost",
+        "port": 5432,
+        "driver": "PostgreSQL",
+        "name": "hexagon_db",
+        "database": "hexagon_db",
+        "username": "postgres",
+        "password": "29157352"
+      }
+    ]
+  }
 }

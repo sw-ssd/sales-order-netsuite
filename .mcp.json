@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "code-review-graph": {
+      "command": "/Users/ssd/.pyenv/versions/3.13.0/bin/python3.13",
+      "args": [
+        "-m",
+        "code_review_graph",
+        "serve"
+      ],
+      "cwd": "/Volumes/UTM2/Developer/sales-order-netsuite",
+      "type": "stdio"
+    }
+  }
+}
