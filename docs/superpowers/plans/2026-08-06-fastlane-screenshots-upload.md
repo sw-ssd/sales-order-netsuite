@@ -243,7 +243,7 @@ Replace existing `beta` lane with:
       skip_waiting_for_build_processing: false,
       api_key_path: ENV["APP_STORE_CONNECT_API_KEY_PATH"] || "./.private_keys/AuthKey_G496UPT5WY.p8",
       api_key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"] || "G496UPT5WY",
-      api_key_issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"] || "d5270d10-579c-4ac2-a52e-c46caccde830"
+      api_key_issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"] || "d5270d10-579c-4ac2-a52e-c46caccde830"
     )
   end
 ```
@@ -265,7 +265,7 @@ Replace existing `production` lane with:
       screenshots_path: screenshots_dir,
       api_key_path: ENV["APP_STORE_CONNECT_API_KEY_PATH"] || "./.private_keys/AuthKey_G496UPT5WY.p8",
       api_key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"] || "G496UPT5WY",
-      api_key_issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"] || "d5270d10-579c-4ac2-a52e-c46caccde830"
+      api_key_issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"] || "d5270d10-579c-4ac2-a52e-c46caccde830"
     )
   end
 ```
@@ -285,7 +285,7 @@ Add inside `platform :ios do`:
       skip_binary_upload: true,
       api_key_path: ENV["APP_STORE_CONNECT_API_KEY_PATH"] || "./.private_keys/AuthKey_G496UPT5WY.p8",
       api_key_id: ENV["APP_STORE_CONNECT_API_KEY_ID"] || "G496UPT5WY",
-      api_key_issuer_id: ENV["APP_STORE_CONNECT_API_ISSUER_ID"] || "d5270d10-579c-4ac2-a52e-c46caccde830"
+      api_key_issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"] || "d5270d10-579c-4ac2-a52e-c46caccde830"
     )
   end
 ```
@@ -655,7 +655,7 @@ Expected: Production releases created in draft status with screenshots.
 - [ ] **Type consistency:**
   - `upload_to_app_store` uses `skip_binary_upload: true`
   - `upload_to_play_store` uses `skip_upload_apk/aab/metadata/changelogs/images/screenshots`
-  - API key env vars: `APP_STORE_CONNECT_API_KEY_PATH`, `APP_STORE_CONNECT_API_KEY_ID`, `APP_STORE_CONNECT_API_ISSUER_ID`
+  - API key env vars: `APP_STORE_CONNECT_API_KEY_PATH`, `APP_STORE_CONNECT_API_KEY_ID`, `APP_STORE_CONNECT_API_KEY_ISSUER_ID`
 - [ ] **Path consistency:**
   - iOS screenshots resolved via `File.expand_path("../../../appimg/export_app_store", __dir__)`
   - Android metadata path `./fastlane/metadata/android` relative to `android/`
