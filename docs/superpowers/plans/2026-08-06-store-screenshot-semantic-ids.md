@@ -296,16 +296,16 @@ Use `read` to view the entire file.
     id: "profile_customer_list_item"
 ```
 
-- [ ] **Step 3: 替換搜尋圖示座標**
+- [ ] **Step 3: 替換訂單表單右上 person_search 圖示座標**
 
 ```yaml
-# before
+# before（訂單表單右上 person_search，開啟客戶選擇）
 - tapOn:
     point: "80%,8%"
 
 # after
 - tapOn:
-    id: "customer_layout_search_icon"
+    id: "order_form_customer_search_icon"
 ```
 
 - [ ] **Step 4: 替換新增客戶按鈕**
@@ -319,16 +319,16 @@ Use `read` to view the entire file.
     id: "customer_layout_add_button"
 ```
 
-- [ ] **Step 5: 替換訂單表單客戶搜尋圖示座標**
+- [ ] **Step 5: 替換客戶列表搜尋欄圖示座標**
 
 ```yaml
-# before
+# before（客戶列表右上放大鏡，開啟搜尋欄）
 - tapOn:
     point: "93%,16%"
 
 # after
 - tapOn:
-    id: "order_form_customer_search_icon"
+    id: "customer_layout_search_icon"
 ```
 
 - [ ] **Step 6: Commit**
@@ -363,13 +363,13 @@ Apply the same selector replacements as Task 5:
     id: "profile_customer_list_item"
 
 - tapOn:
-    id: "customer_layout_search_icon"
+    id: "order_form_customer_search_icon"
 
 - tapOn:
     id: "customer_layout_add_button"
 
 - tapOn:
-    id: "order_form_customer_search_icon"
+    id: "customer_layout_search_icon"
 ```
 
 - [ ] **Step 3: 確認已完成的返回鈕 ID**
