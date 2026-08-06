@@ -26,6 +26,7 @@
   - 其他 Maestro flow（例如 `screenshots/`、`salesrep_login/`）
   - 純顯示文字/圖片
   - 動態產生的列表項目與下拉選項
+  - 底部導航列的「Tab N of 4」自動生成標籤：由 Material `NavigationBar` 產生，跨語言/文案/裝置穩定，且規格替換表中未列，故維持文字 selector。
 
 ## 架構
 
@@ -151,7 +152,7 @@ Testable(
 2. **成功標準**：
    - 兩條 flow 都能跑完並產出截圖
    - 沒有使用 `point:` 座標的靜態按鈕
-   - 所有靜態 tab / 按鈕 / 圖示都用 `id:` selector
+   - 所有靜態按鈕 / 圖示都用 `id:` selector（底部導航列的「Tab N of 4」自動生成標籤除外，見範圍）
    - 不再出現 `Element not found: text matching regex: ...`
 3. **驗收方式**：跑完 flow 後，檢視 `test_output_directory/` 中的截圖與 `commands.json` 確認沒有失敗步驟。
 
