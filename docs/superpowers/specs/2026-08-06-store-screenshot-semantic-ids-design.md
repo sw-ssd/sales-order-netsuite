@@ -132,7 +132,7 @@ Testable(
 
 | 畫面 | 原 selector | 新 id |
 |---|---|---|
-| 首頁 / 功能頁 | `tapOn: "客戶列表"` | `home_customer_list_tab` |
+| 功能頁 | `tapOn: "客戶列表"`（選單項目，非底部 tab） | `profile_customer_list_item` |
 | 客戶列表 | `point: "80%,8%"`（右上角搜尋圖示） | `customer_layout_search_icon` |
 | 客戶列表 | `tapOn: "新增客戶"`（FAB） | `customer_layout_add_button` |
 | 新增客戶 | `point: "95%,14%"`（舊 X 鈕） | `customer_create_back_button`（已完成） |

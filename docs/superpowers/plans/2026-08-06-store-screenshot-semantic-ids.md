@@ -210,43 +210,47 @@ git commit -m "feat(test): add semantic ID to order customer search icon"
 
 ---
 
-### Task 4: 首頁客戶列表 tab 加 ID
+### Task 4: 功能頁「客戶列表」選單項目加 ID
 
 **Files:**
-- Modify: the home/main tab screen file that renders the bottom tab for "客戶列表"
+- Modify: `sales-order-app/lib/layer_presentation/stories/admin/tabs/profile/widgets/profile_list.dart`
 
 **Interfaces:**
 - Consumes: `Testable` from Task 1
-- Produces: `home_customer_list_tab` on the customer list tab destination
+- Produces: `profile_customer_list_item` on the "客戶列表" menu item tile
 
-- [ ] **Step 1: 定位首頁 tab bar**
+**背景（與原始計畫的差異）：** 商店截圖 flow 中 `tapOn: "客戶列表"` 不是底部 tab，而是功能頁（profile）裡的選單項目。該項目由 `ProfileList` 的 `fp.addOntab(menus, 1, onTab, "客戶列表")` 插入在 index 1，並用 `funcCustomTile` 渲染（`profile_list.dart`）。因此 ID 要加在 `ProfileList` 的 `itemBuilder` 中 index 1 的 tile 上。
 
-Find the file that defines the bottom navigation. Search for `"客戶列表"` in `lib/layer_presentation/`.
+- [ ] **Step 1: 在 `ProfileList.itemBuilder` 中包裝 index 1 的 tile**
 
-- [ ] **Step 2: 用 `Testable` 或 `Semantics` 給該 tab ID**
-
-If using `NavigationBar`:
+在 `profile_list.dart` 的 `itemBuilder` 中，把 `funcCustomTile(...)` 的結果包上 `Testable`：
 
 ```dart
-NavigationDestination(
-  icon: Testable(
-    id: 'home_customer_list_tab',
-    child: const Icon(Icons.people),
-  ),
-  label: '客戶列表',
-)
+itemBuilder: (context, index) {
+  final tile = funcCustomTile(
+    context,
+    Text(
+      menus[index].title,
+      style: TextStyle(
+        color: cr.p700,
+        fontWeight: txt.subHeading2Medium.fontWeight,
+        fontSize: txt.subHeading2Medium.fontSize,
+      ),
+    ),
+    leading: Icon(menus[index].leadingIcon, color: menus[index].leadingIconColor),
+    trailing: Icon(menus[index].trailingIcon, color: menus[index].trailingIconColor),
+    onTap: () => menus[index].onTap?.call(context),
+  );
+  return index == 1 ? Testable(id: 'profile_customer_list_item', child: tile) : tile;
+},
 ```
 
-If the tab bar is custom, wrap the tappable region:
+注意：`addOntab` 固定把客戶列表項目插入 index 1，因此以 `index == 1` 判斷。若未來 `addOntab` 位置變更需同步調整。
+
+- [ ] **Step 2: 加入 `Testable` import**
 
 ```dart
-Testable(
-  id: 'home_customer_list_tab',
-  child: InkWell(
-    onTap: () => switchTab(Tab.customer),
-    child: const Column(...),
-  ),
-)
+import 'package:hexagon_food_app/layer_presentation/widgets/testable.dart';
 ```
 
 - [ ] **Step 3: 格式化並 build 檢查**
@@ -254,16 +258,16 @@ Testable(
 Run:
 ```bash
 cd /Volumes/UTM2/Developer/sales-order-netsuite/sales-order-app
-dart format <modified-file>
-flutter build ios --simulator --no-codesign 2>&1 | tail -5
+dart format lib/layer_presentation/stories/admin/tabs/profile/widgets/profile_list.dart
+flutter build ios --simulator --no-codesign --flavor dev 2>&1 | tail -5
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
 cd /Volumes/UTM2/Developer/sales-order-netsuite/sales-order-app
-git add <modified-file>
-git commit -m "feat(test): add semantic ID to home customer list tab"
+git add lib/layer_presentation/stories/admin/tabs/profile/widgets/profile_list.dart
+git commit -m "feat(test): add semantic ID to profile customer list menu item"
 ```
 
 ---
@@ -289,7 +293,7 @@ Use `read` to view the entire file.
 
 # after
 - tapOn:
-    id: "home_customer_list_tab"
+    id: "profile_customer_list_item"
 ```
 
 - [ ] **Step 3: 替換搜尋圖示座標**
@@ -304,7 +308,7 @@ Use `read` to view the entire file.
     id: "customer_layout_search_icon"
 ```
 
-- [ ] **Step 4: 替換新增客戶 FAB**
+- [ ] **Step 4: 替換新增客戶按鈕**
 
 ```yaml
 # before
@@ -350,13 +354,13 @@ git commit -m "test(maestro): use id selectors in Android store screenshot flow"
 
 Use `read` to view the entire file.
 
-- [ ] **Step 2: 替換「客戶列表」tab、搜尋圖示、新增客戶 FAB、訂單客戶搜尋圖示**
+- [ ] **Step 2: 替換「客戶列表」選單項目、搜尋圖示、新增客戶按鈕、訂單客戶搜尋圖示（與 Task 5 相同）**
 
 Apply the same selector replacements as Task 5:
 
 ```yaml
 - tapOn:
-    id: "home_customer_list_tab"
+    id: "profile_customer_list_item"
 
 - tapOn:
     id: "customer_layout_search_icon"
