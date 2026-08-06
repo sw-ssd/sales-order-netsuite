@@ -219,9 +219,9 @@ git commit -m "feat(test): add semantic ID to order customer search icon"
 - Consumes: `Testable` from Task 1
 - Produces: `profile_customer_list_item` on the "客戶列表" menu item tile
 
-**背景（與原始計畫的差異）：** 商店截圖 flow 中 `tapOn: "客戶列表"` 不是底部 tab，而是功能頁（profile）裡的選單項目。該項目由 `ProfileList` 的 `fp.addOntab(menus, 1, onTab, "客戶列表")` 插入在 index 1，並用 `funcCustomTile` 渲染（`profile_list.dart`）。因此 ID 要加在 `ProfileList` 的 `itemBuilder` 中 index 1 的 tile 上。
+**背景（與原始計畫的差異）：** 商店截圖 flow 中 `tapOn: "客戶列表"` 不是底部 tab，而是功能頁（profile）裡的選單項目。該項目由 `ProfileList` 的 `fp.addOntab(menus, 1, onTab, "客戶列表")` 即為 profileMenus 第一個元素（index 0），並用 `funcCustomTile` 渲染（`profile_list.dart`）。因此 ID 要加在 `ProfileList` 的 `itemBuilder` 中 index 0 的 tile 上。
 
-- [ ] **Step 1: 在 `ProfileList.itemBuilder` 中包裝 index 1 的 tile**
+- [ ] **Step 1: 在 `ProfileList.itemBuilder` 中包裝 index 0 的 tile**
 
 在 `profile_list.dart` 的 `itemBuilder` 中，把 `funcCustomTile(...)` 的結果包上 `Testable`：
 
@@ -241,11 +241,11 @@ itemBuilder: (context, index) {
     trailing: Icon(menus[index].trailingIcon, color: menus[index].trailingIconColor),
     onTap: () => menus[index].onTap?.call(context),
   );
-  return index == 1 ? Testable(id: 'profile_customer_list_item', child: tile) : tile;
+  return index == 0 ? Testable(id: 'profile_customer_list_item', child: tile) : tile;
 },
 ```
 
-注意：`addOntab` 固定把客戶列表項目插入 index 1，因此以 `index == 1` 判斷。若未來 `addOntab` 位置變更需同步調整。
+注意：`addOntab` 只是就地修改 `pid == 1` 項目的 title/onTap，不插入、不排序；`profileMenus` 的第一個元素就是 `pid == 1`（客戶列表/公司資料），因此以 `index == 0` 判斷。若未來 `profileMenus` 項目順序變更需同步調整。
 
 - [ ] **Step 2: 加入 `Testable` import**
 
