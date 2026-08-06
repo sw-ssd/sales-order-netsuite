@@ -30,5 +30,8 @@ Thumbs.db
 # Superpowers scratch workspace
 .superpowers/
 
+# Git worktrees
+.worktrees/
+
 # Logs
 *.log
