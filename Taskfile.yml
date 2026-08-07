@@ -52,3 +52,42 @@ tasks:
     cmds:
       - task: backend:test:auth
 
+  # App Store / Play Store release orchestration
+  fastlane:beta:
+    desc: 上傳 iOS + Android Beta build（等同 task app:fastlane:beta）
+    cmds:
+      - task: app:fastlane:beta
+
+  fastlane:production:
+    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（等同 task app:fastlane:production）
+    cmds:
+      - task: app:fastlane:production
+
+  fastlane:upload_metadata:
+    desc: 只上傳 iOS + Android 截圖與 metadata（等同 task app:fastlane:upload_metadata）
+    cmds:
+      - task: app:fastlane:upload_metadata
+
+  # Screenshot orchestration (Maestro → ButterKit → export)
+  screenshots:full:
+    desc: 完整截圖流程：Maestro 擷取 → ButterKit 注入 → 匯出 App Store + Google Play 成品
+    cmds:
+      - task: app:screenshots:ios
+      - task: app:screenshots:inject:ios
+      - task: app:screenshots:export:ios
+      - task: app:screenshots:android
+      - task: app:screenshots:inject:android
+      - task: app:screenshots:export:android
+
+  screenshots:inject:all:
+    desc: 將最新 iOS + Android 截圖注入 ButterKit
+    cmds:
+      - task: app:screenshots:inject:ios
+      - task: app:screenshots:inject:android
+
+  screenshots:export:all:
+    desc: 匯出 iOS App Store + Google Play 成品
+    cmds:
+      - task: app:screenshots:export:ios
+      - task: app:screenshots:export:android
+
