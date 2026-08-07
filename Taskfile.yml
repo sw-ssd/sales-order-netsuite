@@ -99,10 +99,21 @@ tasks:
       - task: fastlane:production:ios
       - task: fastlane:production:android
 
-  fastlane:upload_metadata:
-    desc: 只上傳 iOS + Android 截圖與 metadata（等同 task app:fastlane:upload_metadata）
+  fastlane:upload_metadata:ios:
+    desc: 只上傳 iOS 截圖與 metadata 到 App Store
     cmds:
-      - task: app:fastlane:upload_metadata
+      - cd sales-order-app/ios && bundle exec fastlane ios upload_metadata
+
+  fastlane:upload_metadata:android:
+    desc: 只上傳 Android 截圖與 metadata 到 Play Store
+    cmds:
+      - cd sales-order-app/android && bundle exec fastlane android upload_metadata
+
+  fastlane:upload_metadata:
+    desc: 上傳 iOS + Android 截圖與 metadata
+    cmds:
+      - task: fastlane:upload_metadata:ios
+      - task: fastlane:upload_metadata:android
 
   build:version:
     desc: 更新 Flutter app 版本號與 build number（預設自動遞增；可傳 reset/remove/none）
