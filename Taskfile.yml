@@ -68,6 +68,13 @@ tasks:
     cmds:
       - task: app:fastlane:upload_metadata
 
+  build:version:
+    desc: 更新 Flutter app 版本號與 build number（用法：task build:version -- <build_number>）
+    cmds:
+      - task: app:build:version
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
+
   # Screenshot orchestration (Maestro → ButterKit → export)
   screenshots:full:
     desc: 完整截圖流程：Maestro 擷取 → ButterKit 注入 → 匯出 App Store + Google Play 成品
