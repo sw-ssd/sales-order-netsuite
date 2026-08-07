@@ -54,46 +54,40 @@ tasks:
 
   # App Store / Play Store release orchestration
   fastlane:beta:ios:
-    desc: 上傳 iOS Beta build 到 TestFlight（先 bump version + build number）
+    desc: 上傳 iOS Beta build 到 TestFlight
     cmds:
-      - task: build:version
-        vars:
-          CLI_ARGS: "{{.CLI_ARGS}}"
-      - task: app:fastlane:beta
+      - cd sales-order-app/ios && bundle exec fastlane ios beta
 
   fastlane:beta:android:
-    desc: 上傳 Android Beta build 到 Play Store（先 bump version + build number）
+    desc: 上傳 Android Beta build 到 Play Store
     cmds:
-      - task: build:version
-        vars:
-          CLI_ARGS: "{{.CLI_ARGS}}"
-      - task: app:fastlane:android
+      - cd sales-order-app/android && bundle exec fastlane android beta
 
   fastlane:beta:
     desc: 上傳 iOS + Android Beta build（先 bump version + build number）
     cmds:
+      - task: build:version
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
       - task: fastlane:beta:ios
       - task: fastlane:beta:android
 
   fastlane:production:ios:
-    desc: 上傳 iOS 正式版 build、截圖與 metadata 到 App Store（先 bump version + build number）
+    desc: 上傳 iOS 正式版 build、截圖與 metadata 到 App Store
     cmds:
-      - task: build:version
-        vars:
-          CLI_ARGS: "{{.CLI_ARGS}}"
-      - task: app:fastlane:production
+      - cd sales-order-app/ios && bundle exec fastlane ios production
 
   fastlane:production:android:
-    desc: 上傳 Android 正式版 build、截圖與 metadata 到 Play Store（先 bump version + build number）
+    desc: 上傳 Android 正式版 build、截圖與 metadata 到 Play Store
     cmds:
-      - task: build:version
-        vars:
-          CLI_ARGS: "{{.CLI_ARGS}}"
-      - task: app:fastlane:android
+      - cd sales-order-app/android && bundle exec fastlane android production
 
   fastlane:production:
     desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（先 bump version + build number）
     cmds:
+      - task: build:version
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
       - task: fastlane:production:ios
       - task: fastlane:production:android
 
@@ -103,7 +97,7 @@ tasks:
       - task: app:fastlane:upload_metadata
 
   build:version:
-    desc: 更新 Flutter app 版本號與 build number（用法：task build:version -- <build_number>）
+    desc: 更新 Flutter app 版本號與 build number（預設自動遞增；可傳 reset/remove/none）
     cmds:
       - task: app:build:version
         vars:
