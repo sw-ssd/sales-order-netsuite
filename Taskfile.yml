@@ -80,8 +80,15 @@ tasks:
       - cd sales-order-app/android && bundle exec fastlane android production
 
   fastlane:production:
-    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（lane 會自動遞增 build number）
+    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（-- auto 自增 build number；-- <number> patch+1 並設 build number）
     cmds:
+      - |
+        MODE="{{.CLI_ARGS}}"
+        if [ "$MODE" = "auto" ]; then
+          task build:number
+        elif [ -n "$MODE" ]; then
+          task build:version:patch-and-set -- "$MODE"
+        fi
       - task: fastlane:production:ios
       - task: fastlane:production:android
 
@@ -101,6 +108,13 @@ tasks:
     desc: 只更新 Flutter build number（不改 patch version；預設 +1）
     cmds:
       - task: app:build:number
+
+  build:version:patch-and-set:
+    desc: patch version +1 並設定 build number 為指定值
+    cmds:
+      - task: app:build:version:patch-and-set
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
 
   # Screenshot orchestration (Maestro → ButterKit → export)
   screenshots:full:
