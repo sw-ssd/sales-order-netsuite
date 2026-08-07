@@ -53,21 +53,49 @@ tasks:
       - task: backend:test:auth
 
   # App Store / Play Store release orchestration
-  fastlane:beta:
-    desc: 上傳 iOS + Android Beta build（先 bump version + build number）
+  fastlane:beta:ios:
+    desc: 上傳 iOS Beta build 到 TestFlight（先 bump version + build number）
     cmds:
       - task: build:version
         vars:
           CLI_ARGS: "{{.CLI_ARGS}}"
       - task: app:fastlane:beta
 
-  fastlane:production:
-    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（先 bump version + build number）
+  fastlane:beta:android:
+    desc: 上傳 Android Beta build 到 Play Store（先 bump version + build number）
+    cmds:
+      - task: build:version
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
+      - task: app:fastlane:android
+
+  fastlane:beta:
+    desc: 上傳 iOS + Android Beta build（先 bump version + build number）
+    cmds:
+      - task: fastlane:beta:ios
+      - task: fastlane:beta:android
+
+  fastlane:production:ios:
+    desc: 上傳 iOS 正式版 build、截圖與 metadata 到 App Store（先 bump version + build number）
     cmds:
       - task: build:version
         vars:
           CLI_ARGS: "{{.CLI_ARGS}}"
       - task: app:fastlane:production
+
+  fastlane:production:android:
+    desc: 上傳 Android 正式版 build、截圖與 metadata 到 Play Store（先 bump version + build number）
+    cmds:
+      - task: build:version
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
+      - task: app:fastlane:android
+
+  fastlane:production:
+    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（先 bump version + build number）
+    cmds:
+      - task: fastlane:production:ios
+      - task: fastlane:production:android
 
   fastlane:upload_metadata:
     desc: 只上傳 iOS + Android 截圖與 metadata（等同 task app:fastlane:upload_metadata）
