@@ -21,6 +21,9 @@ Thumbs.db
 .env.local
 *.env.local
 
+# Secrets
+.private_keys/
+
 # Turbo (if introduced in future)
 .turbo/
 
