@@ -54,13 +54,19 @@ tasks:
 
   # App Store / Play Store release orchestration
   fastlane:beta:
-    desc: 上傳 iOS + Android Beta build（等同 task app:fastlane:beta）
+    desc: 上傳 iOS + Android Beta build（先 bump version + build number）
     cmds:
+      - task: build:version
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
       - task: app:fastlane:beta
 
   fastlane:production:
-    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（等同 task app:fastlane:production）
+    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（先 bump version + build number）
     cmds:
+      - task: build:version
+        vars:
+          CLI_ARGS: "{{.CLI_ARGS}}"
       - task: app:fastlane:production
 
   fastlane:upload_metadata:
