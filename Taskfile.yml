@@ -64,11 +64,8 @@ tasks:
       - cd sales-order-app/android && bundle exec fastlane android beta
 
   fastlane:beta:
-    desc: 上傳 iOS + Android Beta build（先 bump version + build number）
+    desc: 上傳 iOS + Android Beta build（lane 會自動遞增 build number）
     cmds:
-      - task: build:version
-        vars:
-          CLI_ARGS: "{{.CLI_ARGS}}"
       - task: fastlane:beta:ios
       - task: fastlane:beta:android
 
@@ -83,11 +80,8 @@ tasks:
       - cd sales-order-app/android && bundle exec fastlane android production
 
   fastlane:production:
-    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（先 bump version + build number）
+    desc: 上傳 iOS + Android 正式版 build、截圖與 metadata（lane 會自動遞增 build number）
     cmds:
-      - task: build:version
-        vars:
-          CLI_ARGS: "{{.CLI_ARGS}}"
       - task: fastlane:production:ios
       - task: fastlane:production:android
 
