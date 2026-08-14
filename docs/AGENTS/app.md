@@ -156,7 +156,6 @@ fvm dart run flutter_native_splash:create  # 等同 task splash
 | `task build:version` | 以 `pub_version_plus` 遞增 build 號（`task build` 內部使用） |
 | `task build:release:android -- appbundle` / `task build:release:ios -- ipa` | prod release 建置（`--` 後為 flutter build 目標） |
 | `task build:debug:android -- apk` / `task build:debug:ios -- ios` | dev debug 建置 |
-| `task upload:ios` | 以 `xcrun altool` 上傳 `build/ios/ipa/*.ipa`（App Store Connect API key ID/issuer 寫在 Taskfile 內，私鑰放 `.private_keys/`） |
 | `task clean` / `task clean:all` | flutter clean + pub get / 含 Pods、build、pub cache 的深層清理 |
 | `task iospod` | 重建 iOS Pods（刪 Pods、Podfile.lock、.symlinks 後 pod install） |
 | `task test:maestro` | 執行 Maestro 整合測試 |
@@ -278,26 +277,26 @@ fvm flutter build ios --flavor prod --target lib/main_prod.dart   # 需 macOS + 
 
 無 CI/CD 服務設定（無 `.github/workflows`、codemagic、bitrise 等）；發布以本機 Fastlane + Taskfile 為主。Ruby 相依定義於根目錄 `Gemfile`（fastlane、xcodeproj 等），`bin/`、`fastlane_bin/` 為 bundler binstub。
 
-### Android
+### Android / iOS
+
+部署由 superproject root Taskfile 統一編排（於 repo root 執行）：
 
 ```bash
-cd android
-bundle exec fastlane android test   # 執行 gradle test
-bundle exec fastlane android beta   # 上傳 Play Store Beta track
+task fastlane:beta                    # 版本遞增 + 建置 + 上傳 Beta（純 binary）
+task fastlane:production              # 版本遞增 + 截圖 + 建置 + 上傳正式版（含 metadata/截圖）
+task fastlane:upload_build:production # 版本遞增 + 建置 + 上傳正式版（純 binary）
 ```
 
-- `beta` lane 僅上傳（`upload_to_play_store(track: 'beta')`，skip APK、metadata、changelogs、images、screenshots），需先自行建置 AAB（如 `task build:release:android -- appbundle`）。
+- 各平台 lane 定義於 `ios/fastlane/Fastfile`、`android/fastlane/Fastfile`；app 層不再維護 combined Fastfile。
+- Android `beta` lane 上傳 Play Store beta track（draft）；`production` 另含截圖與 metadata。
+- iOS `beta` lane 上傳 TestFlight；`production` 另含截圖與 metadata。
+- 平台層亦可單獨執行：`task fastlane:android -- <lane>` / `task fastlane:ios -- <lane>`（於 sales-order-app/）。
+
+**Android**：
 - `android/fastlane/Appfile`：package `com.hexagonty.salesorder.app`，`json_key_file("./keystore/hexagon-salesorder-platform.json")`（Google Play API key，未入版控）。
 - release 簽章需 `android/key.properties` 與 `android/keystore/hexagon-salesorder-keystore.jks`（皆未入版控）。
 
-### iOS
-
-```bash
-cd ios
-bundle exec fastlane ios beta   # upload_to_testflight
-```
-
-- `beta` lane 不含建置，需先有 IPA（`task build:release:ios -- ipa` 建置、`task upload:ios` 上傳，或 fastlane 一併處理）。
+**iOS**：
 - `ios/fastlane/Appfile`：bundle id `com.hexagonty.salesorder.app`、team_id `3YU8K7FQ69`、itc_team_id `124040207`。
 - `ios/fastlane/Snapfile`：snapshot 截圖設定（裝置 iPhone 17 Pro Max / 17 Pro、語系 `zh-Hant`、`dev` scheme、`configuration("Debug-dev")`，輸出至 `ios/fastlane/screenshots/`）。已建立 `RunnerUITests` UI Testing target（4 個 config 與 Runner 一致，已加入 dev / prod scheme 的 TestAction）；執行前尚需加入 SnapshotHelper 與截圖導覽碼（詳見 Snapfile 檔頭註解）。注意：Flutter 的 release/profile 僅能建置實機，模擬器截圖只能用 Debug-dev（產物為 dev app）。
 - 完整一鍵 release 流程見 `task build`（clean → 產生碼 → build 號 +1 → 建置 appbundle + ipa）。
@@ -354,7 +353,7 @@ python3 scripts/butterkit/mcp_call.py call design_export_artboards '{"documentId
 
 - **環境變數檔**：`.dev.env`、`.prod.env` 已被 `.gitignore` 排除（`*.env`）；但 `dev.env.hexagon`（env 範本/備份，含實際值）與 `lib/env/*.g.dart`（混淆後的值）在版控內，請勿外洩。需修改環境變數時請向團隊索取原始 `.env` 檔。
 - **API Access Token**：於 `AuthInterceptor` 以 `X-Sowinsoft-Token` 標頭送出，請勿寫入 log 或截圖。
-- **Taskfile.yml**：`upload:ios` 任務內嵌 App Store Connect API key ID 與 issuer；私鑰（`.p8`）放在 `.private_keys/`（已 gitignore）。
+- **App Store Connect API key**：`ios/fastlane/Fastfile` 的 `app_store_connect_api_key` helper 內嵌 key ID 與 issuer；私鑰（`.p8`）放在 `.private_keys/`（已 gitignore）。
 - **Maestro 測試帳號**：`integration_test/.maestro/salesrep_login/Flow.yaml`、`integration_test/.maestro/screenshots/Flow.yaml` 與 `integration_test/.maestro/screenshots_store_ios/Flow.yaml` 含明碼測試帳密，請勿對外洩漏。
 - **認證資料**：session info、cookies、HTTP 快取皆以 Sembast 存於應用程式快取目錄（`app_storage.db`），未額外加密；測試或審查時請注意資料殘留。
 - **登出與清除**：`AuthSessionManager.clearSession()` 會清除 session、cookies、HTTP 快取、圖片快取（idempotent）；`clearAuthCookies()` 僅清 cookies 且不發通知，用於登入流程失敗時避免狀態不一致與導航競爭。
@@ -400,4 +399,4 @@ Kimi CLI 自 `~/.kimi/mcp.json` 載入 MCP server；**新增或修改 server 後
 
 ---
 
-最後更新：根據 2026-08-03 查證整理（版本 `1.2.6+25`）。
+最後更新：根據 2026-08-14 查證整理（版本 `1.2.6+25`）。
