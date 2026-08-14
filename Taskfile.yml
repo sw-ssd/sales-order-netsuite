@@ -99,6 +99,29 @@ tasks:
       - task: fastlane:production:ios
       - task: fastlane:production:android
 
+  fastlane:upload_build:production:ios:
+    desc: 建置並上傳 iOS 正式版 build（純 binary，不含截圖/metadata）到 App Store
+    cmds:
+      - cd sales-order-app/ios && bundle exec fastlane ios upload_build_production
+
+  fastlane:upload_build:production:android:
+    desc: 建置並上傳 Android 正式版 build（純 binary，不含截圖/metadata）到 Play Store production track
+    cmds:
+      - cd sales-order-app/android && bundle exec fastlane android upload_build_production
+
+  fastlane:upload_build:production:
+    desc: 建置並上傳 iOS + Android 正式版 build（純 binary；-- auto 自增 patch+build；-- <number> patch+1 並設 build number）
+    cmds:
+      - |
+        MODE="{{.CLI_ARGS}}"
+        if [ "$MODE" = "auto" ]; then
+          task build:version
+        elif [ -n "$MODE" ]; then
+          task build:version:patch-and-set -- "$MODE"
+        fi
+      - task: fastlane:upload_build:production:ios
+      - task: fastlane:upload_build:production:android
+
   fastlane:upload_metadata:ios:
     desc: 只上傳 iOS 截圖與 metadata 到 App Store
     cmds:
