@@ -62,6 +62,7 @@
 │   │   ├── customer/        # 客戶 API + 查詢
 │   │   ├── item/            # 品項 API + 查詢
 │   │   ├── metadict/        # NetSuite metadict / 清單值
+│   │   ├── setting/        # 後端設定 API + TanStack 查詢（settingsQuery / useSettings / useUpdateSettings）
 │   │   └── ...（department、estimate-item、salesrep、tenant、user、role、article）
 │   ├── models/               # TypeScript 介面 / 型別
 │   │   ├── base.ts          # 共用基礎型別（篩選、分頁等）
@@ -175,6 +176,8 @@ task deploy
 3. **`src/constant/api.ts`** — 集中管理 API 路徑常數與 `HttpError` 類別。
 4. **`src/lib/requests/utils.ts`** — 包裝 `fetch`、處理 JSON 主體、查詢參數，並為寫入方法附加 `X-CSRF-Token` 標頭（token 由 `src/lib/requests/csrf.ts` 從 `/restricted/csrf` 取得）。
 
+**設定（`src/lib/setting/`）**：`setting.ts` 匯出 `useSettingRequest()`（`getSettingsReq` / `updateSettingsReq`，API 路徑 `getSettings` / `putSettings` 定義於 `src/constant/api.ts`）；`index.ts` 匯出 `settingsQuery()`、`useSettings()`（回傳 `Settings` getter，query 資料未就緒時以 `FALLBACK_SETTINGS` 為 fallback）與 `useUpdateSettings()`（更新成功後以回傳值寫回 query cache）。
+
 在路由 loader 中的使用範例：
 
 ```tsx
@@ -262,6 +265,15 @@ export const Route = createFileRoute("/admin/sales-order")({
 4. 視需要將型別新增至 `src/models/` 或 `src/models/netsuite/`。
 5. 在 `src/constant/sidemenu.ts` 新增側邊欄選單項目。
 
+### 設定頁（`/admin/setting`）
+
+設定頁示範「fallback 常數 + 遮罩 secret + superadmin 門檻」模式：
+
+- 資料層使用 `src/lib/setting/`：元件內以 `useSettings()` 取得 `Settings` getter（`settings().<key>`），以 `useUpdateSettings()` 提交變更。
+- `src/pages/admin/setting/Setting.tsx` 依 `src/models/settings.ts` 的 `SECRET_KEYS` 將 secret 欄位（NetSuite 憑證、email 密碼）以密碼輸入框呈現；輸入框留空 = 提交 `null` = 不變，避免將 GET 遮罩值回寫。
+- 憑證欄位僅 superadmin 可編輯：以 `useAuth()` 的 `isSystemAdmin()` 判斷，非 superadmin 時顯示「僅 superadmin 可編輯憑證欄位。」並停用欄位。
+- 側邊欄「設定管理」項目定義於 `src/constant/sidemenu.ts`（`settingLinkOptions("設定管理")`，走 `/admin/setting` 路由）。
+
 ### 新增 UI 基礎元件
 
 使用 solid-ui CLI 捷徑：
@@ -282,6 +294,7 @@ task ui:add -- <component-name>
 
 ## 注意事項與陷阱
 
+- `src/constant/options.ts` 已改為 **fallback 常數**：僅匯出 `FALLBACK_SETTINGS`（編譯期 fallback，值與 backend seed 一致，供後端 settings API 不可用或 query 未就緒時使用）。取得後端設定請一律透過 `src/lib/setting` 的 `useSettings()`，不要直接引用 `FALLBACK_SETTINGS` 當作即時資料。
 - 應用程式同時匯入 `globals.css`，並依 Tailwind 設定使用 `index.css`。編輯主題前，請先確認 `main.tsx` 實際載入的是哪個檔案。
 - 多個檔案包含無用 / 已註解的程式碼（dashboard widgets、dispatch boards、auth flows）。請驗證實際行為，不要假設註解內容仍然正確。
 - 部分路由守衛使用 `window.location.href` 作為重新導向目標，可能包含完整 origin；若可行，請優先使用 loader 參數中的 `location.href`。
@@ -290,4 +303,4 @@ task ui:add -- <component-name>
 
 ---
 
-最後更新：根據 2026-08-03 查證整理。
+最後更新：根據 2026-08-20 查證整理。
