@@ -98,10 +98,11 @@
 
 網域名稱多為複數英文，例如 `sales_orders`、`customers`、`departments`。API 路徑前綴統一為 `/api/v1`。
 
-例外：`internal/domain/settings` 是單例（資料表只有 id=1 一列），路由為 `/api/v1/settings`（GET `/`、PUT `/`，皆需登入）：
+例外：`internal/domain/settings` 改為 **field 表**（每個設定欄位一列；31 個欄位由 `FieldRegistry` 定義，含欄位 ID、名稱、型別 int64/string/secret、預設值），路由為 `/api/v1/settings`（GET `/`、PUT `/`，皆需登入）：
 
-- **GET**：回傳全部設定，secret 欄位（NetSuite 憑證、EMAIL 密碼）一律以 `••••` 前綴遮罩。
-- **PUT**：非 secret 欄位需 admin / superadmin；含 secret 欄位時僅 superadmin 可更新，且不允許回寫遮罩值。
+- **GET**：回傳 `{"fields":[{field_id,name,field_type,desc,value},…]}` 陣列（全部 31 列），secret 欄位（NetSuite 憑證、EMAIL 密碼）一律以 `••••` 前綴遮罩。
+- **PUT**：批次更新（body 同為 `fields` 陣列）。非 secret 欄位需 admin / superadmin 角色；含 secret 欄位變更時僅 **email 為 `ssd@sowinsoft.com`** 的 superadmin 可更新（403 否則）。secret 欄位 `value: null` = 不變（不清空）；回寫 `••••` 遮罩值 → 400；型別驗證失敗 → 422。
+- **seed**：`Seed` 依 `FieldRegistry` 以單一 atomic bulk insert 建立 31 列（僅當表為空時 seed-once），env 值（`NETSUITE_*` / `EMAIL_*` / `FRONTEND_URL`）在非空時覆寫對應欄位預設。
 
 ## 4. 環境與設定
 
@@ -133,7 +134,7 @@ go run cmd/sw8/main.go -env hexagon.env
 
 > **注意**：`hexagon.env` 目前被追蹤在 repo 中且包含範例/真實憑證。請避免將生產環境祕鑰提交到版本控制。
 
-**NetSuite / EMAIL 憑證種子行為**：server 首次啟動時，`internal/domain/settings` 的 `Seed` 會將 env 載入的 `NETSUITE_*` / `EMAIL_*` 憑證寫入 `settings` 表（僅當 id=1 列不存在時，即 seed 一次）；其後 NetSuite / Email client 均以 **DB 中的設定列為準**建構，環境變數不再覆寫（可透過 PUT `/api/v1/settings` 更新）。`frontend_url` 同樣以 env `FRONTEND_URL` 為種子來源（首次啟動寫入一次）；之後的修改一律經由設定頁面（PUT `/api/v1/settings`）進行。
+**NetSuite / EMAIL 憑證種子行為**：server 首次啟動時，`internal/domain/settings` 的 `Seed` 依 `FieldRegistry` 建立 31 個欄位列（僅當表為空時 seed-once，單一 atomic bulk insert）；`NETSUITE_*` / `EMAIL_*` 憑證與 `FRONTEND_URL` 在對應 env 值非空時覆寫該欄位的 registry 預設。其後 NetSuite / Email client 均以 **DB 中的設定列為準**建構，環境變數不再覆寫（可透過 PUT `/api/v1/settings` 批次更新）。
 
 ## 5. 常用建置與執行指令
 
