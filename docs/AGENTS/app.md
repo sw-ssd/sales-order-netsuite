@@ -57,15 +57,15 @@ lib/
 │   │                         #   api/（各 API 類別 + endpoints + cache_options_mixin）、abstract/（介面）
 │   ├── router/               # auto_route 路由（routes.dart）、RoutePath 列舉（paths.dart）、route_observer
 │   ├── services/             # Providers：auth/、customer/、salesorder/、article/、metadict/、profile/、
-│   │                         #   scaffold/ + refreshable_resource.dart
+│   │                         #   settings/（SettingsService + SettingsStore）、scaffold/ + refreshable_resource.dart
 │   ├── utils/                # locator（GetIt）、flavor_config、tools
 │   ├── extensions/           # BuildContext / DateTime 格式化 / QR 圖片匯出等擴充
 │   └── firebase/             # crashlytics_talker_observer（Talker → Crashlytics 橋接）
 ├── layer_data/               # 資料層
 │   ├── models/               # Freezed + json_serializable 模型
-│   │                         #   （article、auther、base、customer、department、estimate、metadict、salesorder、validations）
+│   │                         #   （article、auther、base、customer、department、estimate、metadict、salesorder、setting、validations）
 │   ├── repositories/         # Sembast 本機儲存（sembast_kv_storage、session_info、cookies、cache）+ abstract/ 介面
-│   ├── constants/            # system_constants、metadict_tables、text_style_const、theme_data
+│   ├── constants/            # system_constants（編譯期 fallback）、metadict_tables、text_style_const、theme_data
 │   ├── converts/             # JsonConverter（session info、Netsuite 日期、salesorder record type）
 │   └── enums/                # SalesOrderRecordType
 └── layer_presentation/       # 表現層
@@ -80,11 +80,12 @@ lib/
 
 - **Flavor / 環境**：`FlavorConfig`（單例，`lib/layer_business/utils/flavor_config.dart`）依 `Flavor.dev` / `Flavor.prod` 讀取 `DevEnv` / `ProdEnv`（envied 產生），提供 `getBaseUrl()`、`getFrontendUrl()`、`getSessionName()`、`getApiAccessToken()` 及 Crashlytics 各開關。Android 上 `localhost` URL 會自動改寫為 `10.0.2.2`。
 - **相依注入（兩層）**：
-  - `GetIt`（`lib/layer_business/utils/locator.dart` 的 `setupLocator()`）註冊基礎設施：`DioClient`、`AuthApi`、`AppRouter`、Sembast storages（session / cookies / cache）、`PersistCookieJar`、`AuthSessionManager`，以及 dev 專屬的 `Talker`。
+  - `GetIt`（`lib/layer_business/utils/locator.dart` 的 `setupLocator()`）註冊基礎設施：`DioClient`、`AuthApi`、`AppRouter`、Sembast storages（session / cookies / cache / settings）、`PersistCookieJar`、`AuthSessionManager`、`SettingsService`（lazy singleton），以及 dev 專屬的 `Talker`。
   - `disco` 的 `ProviderScope`（於 `lib/layer_presentation/app.dart`）注入：`accountAuthProvider`、`customerApi`、`departmentApi`、`estimateApi`、`metadictApi`、`salesorderApi`、`articleApi`；各 story 內另有局部 ProviderScope（如 `customerProvider`、`metadictProvider`）。
 - **狀態管理**：
   - `AuthProvider`（`services/auth/provider.dart`）是唯一的 `ChangeNotifier`，訂閱 `AuthSessionManager.sessionStream`，並作為 router 的 `reevaluateListenable`。
   - 其餘業務 provider（customer、salesorder、article、metadict、scaffold）使用 `flutter_solidart` 的 `Signal` / `ListSignal` / `Resource`，搭配自訂 `RefreshableResource<T, F>`（`services/refreshable_resource.dart`）封裝「filter signal + resource + refresh」模式。
+  - `SettingsService`（`services/settings/settings_service.dart`）以 `Signal<SettingsModel?>`（`settingsSignal`）暴露 backend 設定；`current` 取值順序為 Signal → Sembast 快取 → 編譯期 fallback。
 - **路由**：`auto_route`，定義於 `lib/layer_business/router/routes.dart`（`replaceInRouteName: 'Screen|Page,Route'`）；路徑常數為 `paths.dart` 的 `@MappableEnum() enum RoutePath`（dart_mappable）。登入檢查使用 `AuthGuard`（未登入 `redirectUntil(SelectSigninRoute())`）。路由樹：
   - `/dashboardLayout`（AuthGuard，initial）→ `HomeRoute`、`SalesorderRoute`、`OrderHistoryRoute`、`ProfileRoute`
   - `/customerLayout`（AuthGuard）→ `CustomerRoute`
@@ -94,12 +95,13 @@ lib/
   - auth 另有 forget_password / otp / register / reset_password 四個畫面，路由已註解停用（檔案位於 `stories/auth/widget/unuse/`）。
 - **網路**：`Dio`（`network/dio_client.dart`）+ `CookieManager`（PersistCookieJar）+ 自訂 `AuthInterceptor` + `dio_cache_interceptor`（Sembast store）；連線 timeout 30s、收發 60s。
   - `AuthInterceptor`：`onRequest` 加上 `X-Sowinsoft-Token: <API_ACCESS_TOKEN>` 等標頭；已登入但目標 URI 無 cookies 時主動 `clearSession()`（狀態不一致防護）；`onError` 收到 HTTP 401 時 `clearSession()`。
-  - 各 API 類別（`network/api/*_api.dart`：auth、customer、salesorder、department、estimate、metadict、article）皆有對應抽象介面（`network/abstract/*_api_type.dart`）並混入 `CacheOptionsMixin`（sm 5 分鐘 / md 15 分鐘 / lg 8 小時等快取預設，`hitCacheOnErrorCodes: [400, 404, 500]`）。
+  - 各 API 類別（`network/api/*_api.dart`：auth、customer、salesorder、department、estimate、metadict、article、settings）皆有對應抽象介面（`network/abstract/*_api_type.dart`）並混入 `CacheOptionsMixin`（sm 5 分鐘 / md 15 分鐘 / lg 8 小時等快取預設，`hitCacheOnErrorCodes: [400, 404, 500]`）。
   - 僅 dev flavor 且 debug/profile 模式才掛 `TalkerDioLogger`（不印 request/response data）。
   - 錯誤統一由 `ErrorException`（`network/error_exception.dart`）轉為繁體中文訊息，含 400/401/403/422/429/500/502 fallback。
 - **表單**：`reactive_forms` + `reactive_forms_generator`，表單模型與資料模型同檔（`@Rf()` / `@RfGroup()`）。僅 4 個模型有 `*.gform.dart`：`customer/customer.dart`、`salesorder/salesorder.dart`、`auther/salesrep/signin_form_model.dart`、`auther/customer/customer_signin_form_model.dart`。
 - **資料模型**：以 `freezed` + `json_serializable` 為主（`abstract class ... with _$X`）；僅路由 `RoutePath` 使用 `dart_mappable`。通用 wrapper：`PaginatedModel<T, R>`、`DefaultMetaModel`（`models/base/data_wrapper.dart`）。
-- **本機持久化**：Sembast 單一資料庫 `app_storage.db`（`repositories/sembast_kv_storage.dart`），存放 session info（`session_info_store`）、cookies（`cookie_store`，作為 `PersistCookieJar` 後端）、HTTP 快取（`cache_store`，`http_cache_sembast_store`）。首次啟動從舊版 GetStorage 做一次性遷移（旗標 `_sembast_session_migrated_v1`）。圖片快取使用 `cached_memory_image`（git fork 相依）。
+- **本機持久化**：Sembast 單一資料庫 `app_storage.db`（`repositories/sembast_kv_storage.dart`），存放 session info（`session_info_store`）、cookies（`cookie_store`，作為 `PersistCookieJar` 後端）、HTTP 快取（`cache_store`，`http_cache_sembast_store`）、系統設定（`settings_store`，key `settings`）。首次啟動從舊版 GetStorage 做一次性遷移（旗標 `_sembast_session_migrated_v1`）。圖片快取使用 `cached_memory_image`（git fork 相依）。
+- **系統設定**：`SettingsService`（`services/settings/settings_service.dart`，GetIt lazy singleton）於 app 啟動時 `loadCache()`（`main.dart`）讀取 Sembast 快取，登入成功時 `refresh()`（`services/auth/auth_service.dart`）由 backend `GET /api/v1/settings`（`SettingsApi`，`network/api/settings_api.dart`，sm 快取）重新取得並寫回快取；網路失敗保留既有值。`SystemConstants`（`layer_data/constants/system_constants.dart`）已改為編譯期 fallback：`defaultDepartment = 6`（已修正，與 backend seed 一致）、`frontendUrl = ''`（執行期由 backend settings 覆寫，`deeplinkCompanyLink` 已標記 deprecated）。設定實際用於：customer 部門篩選排除系統部門（`services/customer/customer_service.dart`）、訂單表單系統業務員/部門替換為公司管理員/預設部門（`services/salesorder/salesorder_service.dart`、`stories/admin/salesorder_item/`）、客戶 QR Code / 分享連結組裝 frontendUrl（`getCustomerDeepLinkUrl()`）、關於頁 aboutUrl（`services/profile/profile_service.dart`）。
 
 ---
 
@@ -215,7 +217,7 @@ fvm flutter build ios --flavor prod --target lib/main_prod.dart   # 需 macOS + 
 
 ## 6. 測試
 
-- **單元 / Widget 測試**：目前專案沒有 `test/` 目錄（iOS 僅有預設的 `ios/RunnerTests/RunnerTests.swift`）。若新增測試，請放在 `test/` 並使用 `flutter_test`：
+- **單元 / Widget 測試**：`test/` 目錄已有單元與 widget 測試（`services/settings_service_test.dart`、auth、表單 widget、快取、`integration/` 等）；若新增測試請放在 `test/` 並使用 `flutter_test`：
   ```bash
   fvm flutter test
   ```
@@ -359,7 +361,7 @@ python3 scripts/butterkit/mcp_call.py call design_export_artboards '{"documentId
 - **Maestro 測試帳號**：`integration_test/.maestro/salesrep_login/Flow.yaml`、`integration_test/.maestro/screenshots/Flow.yaml` 與 `integration_test/.maestro/screenshots_store_ios/Flow.yaml` 含明碼測試帳密，請勿對外洩漏。
 - **認證資料**：session info、cookies、HTTP 快取皆以 Sembast 存於應用程式快取目錄（`app_storage.db`），未額外加密；測試或審查時請注意資料殘留。
 - **登出與清除**：`AuthSessionManager.clearSession()` 會清除 session、cookies、HTTP 快取、圖片快取（idempotent）；`clearAuthCookies()` 僅清 cookies 且不發通知，用於登入流程失敗時避免狀態不一致與導航競爭。
-- **Deep Link**：App 處理 `/customer_account_qrcode/:customerAccount` 深度連結（base URL 常數 `SystemConstants.deeplinkCompanyLink = https://frontend.hexagonty.com/customer_account_qrcode`），導向客戶 QR Code 登入頁；實作位於 `lib/layer_presentation/app.dart` 的 `deepLinkBuilder`。
+- **Deep Link**：App 處理 `/customer_account_qrcode/:customerAccount` 深度連結，導向客戶 QR Code 登入頁；實作位於 `lib/layer_presentation/app.dart` 的 `deepLinkBuilder`。客戶 QR Code / 分享連結由 `CustomerService.getCustomerDeepLinkUrl()` 以 `SettingsService.current.frontendUrl`（執行期由 backend settings 提供）組裝，不再使用 `SystemConstants.deeplinkCompanyLink`（已標記 `@Deprecated`，`SystemConstants.frontendUrl` 為空字串）。
 - **Firebase Crashlytics**：dev / prod 預設皆啟用並上傳 fatal error；開關由 `.env` 控制（`ENABLE_CRASHLYTICS`、`ENABLE_CRASHLYTICS_TALKER`、`ENABLE_FATAL_ERROR_RECORDING`），dev 可額外啟用 Talker 觀察者（`CrashlyticsTalkerObserver`）。
 
 ---
@@ -401,4 +403,4 @@ Kimi CLI 自 `~/.kimi/mcp.json` 載入 MCP server；**新增或修改 server 後
 
 ---
 
-最後更新：根據 2026-08-14 查證整理（版本 `1.2.6+25`）。
+最後更新：根據 2026-08-21 查證整理（版本 `1.2.6+25`）。
