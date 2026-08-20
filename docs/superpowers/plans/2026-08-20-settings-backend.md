@@ -172,7 +172,7 @@ cd sales-order-backend && git add database/goose && git commit -m "feat(db): add
 - Test: `sales-order-backend/internal/domain/settings/transformation_test.go`
 
 **Interfaces:**
-- Produces: `SettingDTO` struct（欄位名 = spec §2 JSON key，secret 欄位 `*string`）；`SecretFieldNames []string`；`ToDTO(s *gen.Setting) *SettingDTO`（secret 遮罩）；`ApplyToGen(dto *SettingDTO) (nonSecretSet map[string]any, secretSet map[string]*string)`（供 repository 使用）。
+- Produces: `SettingDTO` struct（欄位名 = spec §2 JSON key，secret 欄位 `*string`）；`SecretFieldNames []string`；`ToDTO(s *gen.Setting) *SettingDTO`（secret 遮罩）；`maskSecret(v string) string`。
 
 - [ ] **Step 1: 寫失敗測試（遮罩規則）**
 
@@ -1085,11 +1085,11 @@ cd sales-order-backend && git add internal/domain/settings && git commit -m "fea
 
 **Files:**
 - Modify: `sales-order-backend/internal/server/server.go`（`newDatabase()`，既有 `c.Seeder(...)` 之後）
-- Modify: `sales-order-backend/internal/server/initDomains.go` — 無需變更（cfg 已被覆寫），僅驗證。
+- Modify: `sales-order-backend/internal/server/initDomains.go` — 新增 `initSettings()` 並於 `InitDomains()` 呼叫（路由註冊）
 
 **Interfaces:**
-- Consumes: `settings.Seed`、`settings.Load`、`settings.ToNetSuiteConfig`、`settings.ToEmailConfig`（Task 4）。
-- Produces: 啟動後 `s.cfg.NetSuite` / `s.cfg.Email` 為 DB 值；`newNSClient(s.cfg.NetSuite)` 與 mail 建構沿用不變。
+- Consumes: `settings.Seed`、`settings.Load`、`settings.ToNetSuiteConfig`、`settings.ToEmailConfig`（Task 4）；`settings.NewRepository`、`settings.NewUseCase`、`settings.RegisterHTTPEndPoints`（Task 6）。
+- Produces: 啟動後 `s.cfg.NetSuite` / `s.cfg.Email` 為 DB 值；`newNSClient(s.cfg.NetSuite)` 與 mail 建構沿用不變；`/api/v1/settings` 路由註冊生效。
 
 - [ ] **Step 1: server.go 加入 seed + load + 覆寫**
 
@@ -1110,15 +1110,33 @@ cd sales-order-backend && git add internal/domain/settings && git commit -m "fea
 
 並在 import 加上 `"github.com/hexagon-maker/sales-order-backend/internal/domain/settings"`。
 
-- [ ] **Step 2: 驗證 build**
+- [ ] **Step 2: initDomains.go 註冊 settings 路由**
+
+於 `initDomains.go` 新增（參照 `initArticles` 模式）：
+
+```go
+func (s *Server) initSettings() {
+	repo := settings.NewRepository(s.ent)
+	uc := settings.NewUseCase(repo)
+	settings.RegisterHTTPEndPoints(s.router, s.session, uc)
+}
+```
+
+並在 `InitDomains()` 的呼叫序列中加上 `s.initSettings()`（與其他 init 函式並列）；import 補上 settings domain。
+
+- [ ] **Step 3: 驗證 build**
 
 Run: `cd sales-order-backend && go build ./...`
-Expected: 通過。`initDomains.go` 不需修改（`s.cfg.NetSuite`/`s.cfg.Email` 已為 DB 值）。
+Expected: 通過。
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: 冒煙（可選）**
+
+Run: `cd sales-order-backend && task routes`（或 `go run cmd/route`）確認 `/api/v1/settings` 出現。
+
+- [ ] **Step 5: Commit**
 
 ```bash
-cd sales-order-backend && git add internal/server/server.go && git commit -m "feat(server): seed settings and build NS/email clients from DB"
+cd sales-order-backend && git add internal/server/server.go internal/server/initDomains.go && git commit -m "feat(server): seed settings, build NS/email clients from DB, register routes"
 ```
 
 ---
