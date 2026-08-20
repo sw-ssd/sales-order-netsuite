@@ -98,6 +98,11 @@
 
 網域名稱多為複數英文，例如 `sales_orders`、`customers`、`departments`。API 路徑前綴統一為 `/api/v1`。
 
+例外：`internal/domain/settings` 是單例（資料表只有 id=1 一列），路由為 `/api/v1/settings`（GET `/`、PUT `/`，皆需登入）：
+
+- **GET**：回傳全部設定，secret 欄位（NetSuite 憑證、EMAIL 密碼）一律以 `••••` 前綴遮罩。
+- **PUT**：非 secret 欄位需 admin / superadmin；含 secret 欄位時僅 superadmin 可更新，且不允許回寫遮罩值。
+
 ## 4. 環境與設定
 
 設定採用 **env file + 環境變數** 混合模式：
@@ -126,6 +131,8 @@ go run cmd/sw8/main.go -env hexagon.env
 | `OAUTH2_*` | `config/provider.go` | Google OAuth2（目前 `config.New` 預設未啟用） |
 
 > **注意**：`hexagon.env` 目前被追蹤在 repo 中且包含範例/真實憑證。請避免將生產環境祕鑰提交到版本控制。
+
+**NetSuite / EMAIL 憑證種子行為**：server 首次啟動時，`internal/domain/settings` 的 `Seed` 會將 env 載入的 `NETSUITE_*` / `EMAIL_*` 憑證寫入 `settings` 表（僅當 id=1 列不存在時，即 seed 一次）；其後 NetSuite / Email client 均以 **DB 中的設定列為準**建構，環境變數不再覆寫（可透過 PUT `/api/v1/settings` 更新）。
 
 ## 5. 常用建置與執行指令
 
