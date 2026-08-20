@@ -132,7 +132,7 @@ go run cmd/sw8/main.go -env hexagon.env
 
 > **注意**：`hexagon.env` 目前被追蹤在 repo 中且包含範例/真實憑證。請避免將生產環境祕鑰提交到版本控制。
 
-**NetSuite / EMAIL 憑證種子行為**：server 首次啟動時，`internal/domain/settings` 的 `Seed` 會將 env 載入的 `NETSUITE_*` / `EMAIL_*` 憑證寫入 `settings` 表（僅當 id=1 列不存在時，即 seed 一次）；其後 NetSuite / Email client 均以 **DB 中的設定列為準**建構，環境變數不再覆寫（可透過 PUT `/api/v1/settings` 更新）。
+**NetSuite / EMAIL 憑證種子行為**：server 首次啟動時，`internal/domain/settings` 的 `Seed` 會將 env 載入的 `NETSUITE_*` / `EMAIL_*` 憑證寫入 `settings` 表（僅當 id=1 列不存在時，即 seed 一次）；其後 NetSuite / Email client 均以 **DB 中的設定列為準**建構，環境變數不再覆寫（可透過 PUT `/api/v1/settings` 更新）。`frontend_url` 同樣以 env `FRONTEND_URL` 為種子來源（首次啟動寫入一次）；之後的修改一律經由設定頁面（PUT `/api/v1/settings`）進行。
 
 ## 5. 常用建置與執行指令
 
