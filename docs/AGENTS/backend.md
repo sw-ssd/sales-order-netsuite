@@ -129,6 +129,7 @@ go run cmd/sw8/main.go -env hexagon.env
 | `NETSUITE_*` | `config/netsuite.go` | NetSuite Token Based Authentication |
 | `OTEL_*` | `config/opentelemetry.go` | OpenTelemetry（目前 `config.New` 預設未啟用） |
 | `OAUTH2_*` | `config/provider.go` | Google OAuth2（目前 `config.New` 預設未啟用） |
+| `FRONTEND_URL` | `internal/server/server.go`（settings seed 使用） | 前端站台 URL；首次啟動種子寫入 `settings.frontend_url`（其後以設定頁編輯） |
 
 > **注意**：`hexagon.env` 目前被追蹤在 repo 中且包含範例/真實憑證。請避免將生產環境祕鑰提交到版本控制。
 
