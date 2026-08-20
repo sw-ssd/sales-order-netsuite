@@ -72,6 +72,9 @@ tasks:
           task build:version
         elif [ -n "$MODE" ]; then
           task build:version:patch-and-set -- "$MODE"
+        else
+          echo "Usage: task {{.TASK}} -- auto | <build_number>" >&2
+          exit 1
         fi
       - task: fastlane:beta:ios
       - task: fastlane:beta:android
@@ -95,6 +98,9 @@ tasks:
           task build:version
         elif [ -n "$MODE" ]; then
           task build:version:patch-and-set -- "$MODE"
+        else
+          echo "Usage: task {{.TASK}} -- auto | <build_number>" >&2
+          exit 1
         fi
       - task: fastlane:production:ios
       - task: fastlane:production:android
@@ -118,6 +124,9 @@ tasks:
           task build:version
         elif [ -n "$MODE" ]; then
           task build:version:patch-and-set -- "$MODE"
+        else
+          echo "Usage: task {{.TASK}} -- auto | <build_number>" >&2
+          exit 1
         fi
       - task: fastlane:upload_build:production:ios
       - task: fastlane:upload_build:production:android

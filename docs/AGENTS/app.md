@@ -282,10 +282,12 @@ fvm flutter build ios --flavor prod --target lib/main_prod.dart   # 需 macOS + 
 部署由 superproject root Taskfile 統一編排（於 repo root 執行）：
 
 ```bash
-task fastlane:beta                    # 版本遞增 + 建置 + 上傳 Beta（純 binary）
-task fastlane:production              # 版本遞增 + 截圖 + 建置 + 上傳正式版（含 metadata/截圖）
-task fastlane:upload_build:production # 版本遞增 + 建置 + 上傳正式版（純 binary）
+task fastlane:beta -- auto                    # 版本遞增 + 建置 + 上傳 Beta（純 binary）
+task fastlane:production -- auto              # 版本遞增 + 截圖 + 建置 + 上傳正式版（含 metadata/截圖）
+task fastlane:upload_build:production -- auto # 版本遞增 + 建置 + 上傳正式版（純 binary）
 ```
+
+- 上述三個 task 皆需 `-- auto`（自增 patch+build）或 `-- <build_number>`（patch+1 並設 build number）；不帶參數會直接報錯，避免以上一版版本號重複上傳。
 
 - 各平台 lane 定義於 `ios/fastlane/Fastfile`、`android/fastlane/Fastfile`；app 層不再維護 combined Fastfile。
 - Android `beta` lane 上傳 Play Store beta track（draft）；`production` 另含截圖與 metadata。
