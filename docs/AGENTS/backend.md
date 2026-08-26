@@ -98,11 +98,12 @@
 
 網域名稱多為複數英文，例如 `sales_orders`、`customers`、`departments`。API 路徑前綴統一為 `/api/v1`。
 
-例外：`internal/domain/settings` 改為 **field 表**（每個設定欄位一列；31 個欄位由 `FieldRegistry` 定義，含欄位 ID、名稱、型別 int64/string/secret、預設值），路由為 `/api/v1/settings`（GET `/`、PUT `/`，皆需登入）：
+例外：`internal/domain/settings` 改為 **field 表**（每個設定欄位一列；35 個欄位由 `FieldRegistry` 定義，含欄位 ID、名稱、型別 int64/string/secret/bool/duration、預設值），路由為 `/api/v1/settings`（GET `/`、PUT `/`，皆需登入）：
 
-- **GET**：回傳 `{"fields":[{field_id,name,field_type,desc,value},…]}` 陣列（全部 31 列），secret 欄位（NetSuite 憑證、EMAIL 密碼）一律以 `••••` 前綴遮罩。
-- **PUT**：批次更新（body 同為 `fields` 陣列）。非 secret 欄位需 admin / superadmin 角色；含 secret 欄位變更時僅 **email 為 `ssd@sowinsoft.com`** 的 superadmin 可更新（403 否則）。secret 欄位 `value: null` = 不變（不清空）；回寫 `••••` 遮罩值 → 400；型別驗證失敗 → 422。
-- **seed**：`Seed` 依 `FieldRegistry` 以單一 atomic bulk insert 建立 31 列（僅當表為空時 seed-once），env 值（`NETSUITE_*` / `EMAIL_*` / `FRONTEND_URL`）在非空時覆寫對應欄位預設。
+- **GET**：回傳 `{"fields":[{field_id,name,field_type,desc,value},…]}` 陣列（全部 35 列），secret 欄位（NetSuite 憑證、EMAIL 密碼）一律以 `••••` 前綴遮罩。
+- **PUT**：批次更新（body 同為 `fields` 陣列）。非 secret 欄位需 admin / superadmin 角色；含 secret 欄位變更時僅 **email 為 `ssd@sowinsoft.com`** 的 superadmin 可更新（403 否則）。superadmin 判定用 `SessionInfoResource.Email()`（user/salesrep 形態皆可；superadmin 實際以 salesrep session 登入）且**豁免角色閘**。secret 欄位 `value: null` = 不變（不清空）；回寫 `••••` 遮罩值 → 400；型別驗證失敗 → 422。
+- **seed**：`Seed` 依 `FieldRegistry` 補上缺漏的欄位列（backfill：已存在的 field_id 不動，缺漏者單一 atomic bulk insert），env 值（`NETSUITE_*` / `EMAIL_*` / `FRONTEND_URL`）在非空時覆寫對應欄位預設。
+- **session 行為參數**：`session_duration` / `session_idle_timeout` / `session_sliding` / `session_warn_before`（duration 為 Go duration 字串）由 settings 表管理；server 啟動時從 DB 解析建構 `scs.SessionManager`（`ParseSessionSettings`），PUT 含 `session_*` 欄位時經 `NewUseCase` 的 `SessionApplier` hook 即時寫回 `manager.Lifetime`/`IdleTimeout`，不需重啟。
 
 ## 4. 環境與設定
 
@@ -124,7 +125,7 @@ go run cmd/sw8/main.go -env hexagon.env
 | `API_*` | `config/api.go` | 埠號、secret、版本、swagger、graceful timeout |
 | `DB_*` | `config/database.go` | 資料庫連線、pool、Cloud SQL instance |
 | `CORS_*` | `config/cors.go` | 允許來源清單 |
-| `SESSION_*` | `config/cookie.go` | Cookie 名稱、HttpOnly、Secure、SameSite、Lifetime |
+| `SESSION_*` | `config/cookie.go` | Cookie 結構參數（Name/Path/Domain/HttpOnly/Secure/SameSite）；行為參數（duration/idle/sliding/warn_before）已移至 settings 表 |
 | `EMAIL_*` | `config/email.go` | SMTP 帳號密碼 |
 | `REDIS_*` | `config/cache.go` | Redis/Cluster 設定（目前 `config.New` 預設未啟用） |
 | `NETSUITE_*` | `config/netsuite.go` | NetSuite Token Based Authentication |
@@ -134,7 +135,7 @@ go run cmd/sw8/main.go -env hexagon.env
 
 > **注意**：`hexagon.env` 目前被追蹤在 repo 中且包含範例/真實憑證。請避免將生產環境祕鑰提交到版本控制。
 
-**NetSuite / EMAIL 憑證種子行為**：server 首次啟動時，`internal/domain/settings` 的 `Seed` 依 `FieldRegistry` 建立 31 個欄位列（僅當表為空時 seed-once，單一 atomic bulk insert）；`NETSUITE_*` / `EMAIL_*` 憑證與 `FRONTEND_URL` 在對應 env 值非空時覆寫該欄位的 registry 預設。其後 NetSuite / Email client 均以 **DB 中的設定列為準**建構，環境變數不再覆寫（可透過 PUT `/api/v1/settings` 批次更新）。
+**NetSuite / EMAIL 憑證種子行為**：server 啟動時，`internal/domain/settings` 的 `Seed` 依 `FieldRegistry` 補上缺漏欄位列（backfill，既有列不覆寫，單一 atomic bulk insert）；`NETSUITE_*` / `EMAIL_*` 憑證與 `FRONTEND_URL` 在對應 env 值非空時覆寫該欄位的 registry 預設。其後 NetSuite / Email client 均以 **DB 中的設定列為準**建構，環境變數不再覆寫（可透過 PUT `/api/v1/settings` 批次更新）。
 
 ## 5. 常用建置與執行指令
 
