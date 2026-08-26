@@ -270,9 +270,11 @@ export const Route = createFileRoute("/admin/sales-order")({
 設定頁是 **data-driven（field rows）** 的示範：欄位的 label / type / desc 全部由後端設定 API 的 `SettingsField` 列（`{ field_id, name, field_type, desc, value }`）驅動，前端只負責靜態分組與渲染：
 
 - 資料層使用 `src/lib/setting/`：元件內以 `useSettings()` 取得 `() => SettingsField[]` getter，以 `useSettingsValue(field_id)` 取單一欄位值；變更以 `useUpdateSettings().mutateAsync({ fields })` 提交（PUT payload 為整個 `{ fields: SettingsField[] }`）。
-- `src/models/settings.ts` 的 `FIELD_GROUPS` 定義靜態分組（標題 + `fieldIds` 清單），每個 `field_id` 渲染為一列；未知 `field_id` 不渲染。
+- `src/pages/admin/setting/Setting.tsx` 的 `FIELD_GROUPS` 定義靜態分組（標題 + `fieldIds` 清單），每個 `field_id` 渲染為一列；未知 `field_id` 不渲染。
+- 「Session 設定」群組（`session_duration`/`session_idle_timeout`/`session_sliding`/`session_warn_before`）：duration 欄位值為 Go duration 字串（如 `72h`），渲染為一般 text input，格式由後端 422 驗證把關；`session_sliding` 走既有 bool 輸入（`true`/`false`）。
+- `SessionExpiryDialog` 的到期提醒提前時間由 `useSettingsValue(() => authState.isAuth)("session_warn_before")` + `parseGoDuration`（`src/lib/setting/duration.ts`，回傳毫秒）取得，fallback 5 分鐘；因掛在 `main.tsx` 根層（登入邊界外），必須傳 `enabled` accessor。
 - `field_type === "secret"` 的欄位（NetSuite 憑證、email 密碼）以密碼輸入框呈現：GET 回傳的 `value` 為遮罩（secret 不回傳明文），`value` 為 `null` 時 placeholder 顯示「（未設定）」；輸入框留空 = 提交 `value: null` = 不變，避免將遮罩值回寫。
-- 憑證欄位僅 superadmin 可編輯：以 `useAuth()` 回傳的 `[AuthState, AuthFuncs]` tuple 之 `authState.info.user.email === "ssd@sowinsoft.com"` 判定（與 backend 403 一致，非 `isSystemAdmin()`）；非 superadmin 時顯示「僅 superadmin（ssd@sowinsoft.com）可編輯憑證欄位。」並停用 secret 輸入框。
+- 憑證欄位僅 superadmin 可編輯：以 `useAuth()` 回傳的 `[AuthState, AuthFuncs]` tuple 之 session email 判定（`authState.info.user?.email ?? authState.info.salesrep?.email === "ssd@sowinsoft.com"`，與 backend `SessionInfoResource.Email()` 一致，非 `isSystemAdmin()`）。注意 Signin 僅有 **salesrep 登入**：session 的 email 位於 `info.salesrep`、`info.user` 為 undefined；唯讀 `info.user` 會讓 superadmin 永遠被擋。非 superadmin 時顯示「僅 superadmin（ssd@sowinsoft.com）可編輯憑證欄位。」並停用 secret 輸入框。
 - 側邊欄「設定管理」項目定義於 `src/constant/sidemenu.ts`（`settingLinkOptions("設定管理")`，走 `/admin/setting` 路由）。
 
 ### 新增 UI 基礎元件
@@ -296,6 +298,7 @@ task ui:add -- <component-name>
 ## 注意事項與陷阱
 
 - `src/constant/options.ts` 已改為 **fallback 常數**：僅匯出 `FALLBACK_SETTINGS`（編譯期 fallback，值與 backend seed 一致，供後端 settings API 不可用或 query 未就緒時使用）。取得後端設定請一律透過 `src/lib/setting` 的 `useSettings()` / `useSettingsValue()`，不要直接引用 `FALLBACK_SETTINGS` 當作即時資料。
+- settings query 的 auth gating：`AuthProvider`（掛在 `/signin` 等所有路由之上）以 `useSettingsValue(() => authState.isAuth)` 呼叫；未登入時**不得**對 `/api/v1/settings` 發請求（無 session cookie → 後端 401「Session token is empty」）。呼叫 `useSettings()` / `useSettingsValue()` 於登入邊界外時，必須傳入 `enabled` accessor。另外全域 401 handler（`errorDefaultChecker`）在已位於 `/signin` 時不會再導向，避免 redirect 參數無限巢狀化（431 迴圈）。
 - 應用程式同時匯入 `globals.css`，並依 Tailwind 設定使用 `index.css`。編輯主題前，請先確認 `main.tsx` 實際載入的是哪個檔案。
 - 多個檔案包含無用 / 已註解的程式碼（dashboard widgets、dispatch boards、auth flows）。請驗證實際行為，不要假設註解內容仍然正確。
 - 部分路由守衛使用 `window.location.href` 作為重新導向目標，可能包含完整 origin；若可行，請優先使用 loader 參數中的 `location.href`。
