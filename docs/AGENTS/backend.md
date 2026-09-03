@@ -98,9 +98,9 @@
 
 網域名稱多為複數英文，例如 `sales_orders`、`customers`、`departments`。API 路徑前綴統一為 `/api/v1`。
 
-例外：`internal/domain/settings` 改為 **field 表**（每個設定欄位一列；35 個欄位由 `FieldRegistry` 定義，含欄位 ID、名稱、型別 int64/string/secret/bool/duration、預設值），路由為 `/api/v1/settings`（GET `/`、PUT `/`，皆需登入）：
+例外：`internal/domain/settings` 改為 **field 表**（每個設定欄位一列；34 個欄位由 `FieldRegistry` 定義，含欄位 ID、名稱、型別 int64/string/secret/bool/duration、預設值），路由為 `/api/v1/settings`（GET `/`、PUT `/`，皆需登入）：
 
-- **GET**：回傳 `{"fields":[{field_id,name,field_type,desc,value},…]}` 陣列（全部 35 列），secret 欄位（NetSuite 憑證、EMAIL 密碼）一律以 `••••` 前綴遮罩。
+- **GET**：回傳 `{"fields":[{field_id,name,field_type,desc,value},…]}` 陣列（全部 34 列），secret 欄位（NetSuite 憑證、EMAIL 密碼）一律以 `••••` 前綴遮罩。
 - **PUT**：批次更新（body 同為 `fields` 陣列）。非 secret 欄位需 admin / superadmin 角色；含 secret 欄位變更時僅 **email 為 `ssd@sowinsoft.com`** 的 superadmin 可更新（403 否則）。superadmin 判定用 `SessionInfoResource.Email()`（user/salesrep 形態皆可；superadmin 實際以 salesrep session 登入）且**豁免角色閘**。secret 欄位 `value: null` = 不變（不清空）；回寫 `••••` 遮罩值 → 400；型別驗證失敗 → 422。
 - **seed**：`Seed` 依 `FieldRegistry` 補上缺漏的欄位列（backfill：已存在的 field_id 不動，缺漏者單一 atomic bulk insert），env 值（`NETSUITE_*` / `EMAIL_*` / `FRONTEND_URL`）在非空時覆寫對應欄位預設。
 - **session 行為參數**：`session_duration` / `session_idle_timeout` / `session_sliding` / `session_warn_before`（duration 為 Go duration 字串）由 settings 表管理；server 啟動時從 DB 解析建構 `scs.SessionManager`（`ParseSessionSettings`），PUT 含 `session_*` 欄位時經 `NewUseCase` 的 `SessionApplier` hook 即時寫回 `manager.Lifetime`/`IdleTimeout`，不需重啟。
